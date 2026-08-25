@@ -1,6 +1,6 @@
 # Taker fee hurdle and admission policy
 
-Updated 2026-08-24 for the v19.20 source candidate.
+Updated 2026-08-25 for the deployed v19.20 production path.
 
 ## Evidence behind the hurdle
 

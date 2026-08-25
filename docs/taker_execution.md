@@ -1,6 +1,6 @@
 # Taker-only execution policy
 
-Updated 2026-08-24 for the v19.20 source candidate.
+Updated 2026-08-25 for the deployed v19.20 production path.
 
 ## Production decision
 

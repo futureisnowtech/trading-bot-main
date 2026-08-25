@@ -13,7 +13,6 @@ import logging
 import json
 import sqlite3
 import sys
-import shlex
 from typing import Optional, List
 
 from config import DB_PATH, REPO_ROOT
@@ -41,7 +40,7 @@ def execute_sql(query: str) -> str:
             rows = conn.execute(query).fetchall()
             if not rows:
                 return "Query executed successfully. Result: No rows returned."
-            
+
             data = [dict(r) for r in rows[:50]]
             res = json.dumps(data, indent=2)
             if len(rows) > 50:
@@ -58,13 +57,13 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
         repo_root = os.path.abspath(REPO_ROOT)
         if not abs_path.startswith(repo_root) and not abs_path.startswith("/app"):
             return "Error: Access denied. Cannot read files outside of the repository root."
-        
+
         if not os.path.exists(abs_path):
             return f"Error: File '{file_path}' does not exist."
 
         with open(abs_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            
+
         if start_line is not None or end_line is not None:
             s = (start_line - 1) if start_line else 0
             e = end_line if end_line else len(lines)
@@ -72,11 +71,11 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
         else:
             is_doc = file_path.endswith('.md') or file_path.endswith('.txt')
             limit = 10000 if is_doc else 5000
-            
+
             content = "".join(lines[:limit])
             if len(lines) > limit:
                 content += f"\n... (truncated at {limit} lines. Use start_line/end_line to read more.)"
-        
+
         return content
     except Exception as e:
         return f"Error reading file: {str(e)}"
@@ -88,7 +87,7 @@ def list_files(dir_path: str = ".") -> str:
         abs_path = os.path.abspath(dir_path)
         if not abs_path.startswith(os.getcwd()):
             return "Error: Access denied."
-        
+
         items = os.listdir(abs_path)
         res = []
         for item in sorted(items):
@@ -98,30 +97,6 @@ def list_files(dir_path: str = ".") -> str:
         return "\n".join(res)
     except Exception as e:
         return f"Error listing files: {str(e)}"
-
-def replace_text(file_path: str, old_string: str, new_string: str) -> str:
-    """Surgically replaces text in a file. Requires exact string match. USE SPARINGLY."""
-    try:
-        abs_path = os.path.abspath(file_path)
-        if not abs_path.startswith(os.getcwd()):
-            return "Error: Access denied."
-
-        with open(abs_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        if old_string not in content:
-            return "Error: Exact match not found."
-
-        if content.count(old_string) > 1:
-            return "Error: Multiple occurrences. Provide more context."
-
-        new_content = content.replace(old_string, new_string)
-        with open(abs_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-
-        return f"Successfully updated '{file_path}'."
-    except Exception as e:
-        return f"Error updating file: {str(e)}"
 
 def get_live_kalshi_status() -> str:
     """Return broker-first live Kalshi truth, including DB drift and lane state."""
@@ -166,6 +141,23 @@ def get_weather_learning_status() -> str:
         return json.dumps(_get_weather_learning_status(), indent=2)
     except Exception as e:
         logger.error("AI weather learning summary error: %s", e)
+        return f"Error: {str(e)}"
+
+
+def get_production_policy_status() -> str:
+    """Return build, execution, probability, RBI, and binding risk policy truth."""
+    try:
+        from runtime.operator_truth import (
+            get_live_kalshi_status as _get_live_kalshi_status,
+        )
+
+        truth = _get_live_kalshi_status(
+            include_recent_vetoes=False,
+            include_recent_execution=False,
+        )
+        return json.dumps(truth.get("production_policy") or {}, indent=2)
+    except Exception as e:
+        logger.error("AI production policy summary error: %s", e)
         return f"Error: {str(e)}"
 
 def get_release_status() -> str:
@@ -235,88 +227,5 @@ def run_release_audit(command: str) -> str:
     except subprocess.CalledProcessError as e:
         return e.output or f"Error: command exited {e.returncode}"
     except Exception as e:
-        return f"Error: {str(e)}"
-
-def run_safe_command(command: str) -> str:
-    """Runs restricted shell commands (grep, py_compile, git status, git diff, git log, sqlite3, etc)."""
-    allowed_exact = {
-        "python3 scripts/verify_kalshi_connection.py",
-        "python scripts/verify_kalshi_connection.py",
-        f"{sys.executable} scripts/verify_kalshi_connection.py",
-        "python3 scripts/storage_audit.py",
-        "python scripts/storage_audit.py",
-        f"{sys.executable} scripts/storage_audit.py",
-        f"{sys.executable} scripts/release_audit.py --local",
-        f"{sys.executable} scripts/release_audit.py --remote",
-    }
-    allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "git log", "find", "sqlite3", "cat", "head", "tail", "wc", "ls"]
-    is_allowed = any(command.strip().startswith(base) for base in allowed_bases)
-
-    try:
-        parts = shlex.split(command)
-    except Exception:
-        parts = []
-    if len(parts) == 2 and parts[0] in {"python", "python3", sys.executable}:
-        is_allowed = parts[1] in {
-            "scripts/verify_kalshi_connection.py",
-            "scripts/storage_audit.py",
-        }
-
-    if command not in allowed_exact and not is_allowed:
-        return "Error: Command not in whitelist."
-
-    if command.startswith("git ") and not os.path.isdir(os.path.join(os.getcwd(), ".git")):
-        return "Error: Git metadata is not deployed in this runtime; git commands are unavailable here."
-
-    try:
-        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=30).decode()
-        return result if result else "Success (no output)."
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-def apply_autonomous_hub_parameter_optimization(
-    hub_name: str,
-    parameter_key: str,
-    new_value: float,
-    reasoning: str,
-) -> str:
-    """Executes closed-loop parameter mutation with walk-forward validation, atomic lock, and preflight checks."""
-    try:
-        from learning.agent_optimizer import propose_and_apply_hub_parameter
-
-        res = propose_and_apply_hub_parameter(
-            hub_name=hub_name,
-            parameter_key=parameter_key,
-            new_value=new_value,
-            reasoning=reasoning,
-        )
-        return json.dumps(res, indent=2)
-    except Exception as e:
-        logger.error("AI autonomous optimization error: %s", e)
-        return f"Error: {str(e)}"
-
-
-def get_autonomous_mutation_history(limit: int = 10) -> str:
-    """Retrieves immutable mutation audit trail log."""
-    try:
-        from runtime.agent_mutation_ledger import get_mutation_history
-
-        history = get_mutation_history(limit=limit)
-        return json.dumps(history, indent=2)
-    except Exception as e:
-        logger.error("AI mutation history error: %s", e)
-        return f"Error: {str(e)}"
-
-
-def run_soak_monitor_check() -> str:
-    """Evaluates all 72h soaking mutations and triggers automated rollbacks if performance degrades."""
-    try:
-        from runtime.post_deploy_soak import run_post_deploy_soak_monitor
-
-        res = run_post_deploy_soak_monitor()
-        return json.dumps(res, indent=2)
-    except Exception as e:
-        logger.error("AI soak monitor check error: %s", e)
         return f"Error: {str(e)}"
 

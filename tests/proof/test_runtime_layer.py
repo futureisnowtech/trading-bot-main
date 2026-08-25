@@ -445,6 +445,29 @@ def test_operator_brief_summarizes_live_truth_in_plain_english(monkeypatch):
             "broker_positions_count": 2,
             "active_markets": 11,
             "position_drift": {"has_drift": True},
+            "production_policy": {
+                "version": "19.20.0",
+                "short_sha": "2cff745",
+                "execution": {"entry_route": "taker_only_ioc"},
+                "probability": {
+                    "model_path": "deterministic_gfs_ecmwf_aigfs_hrrr_physics",
+                    "physics_method": "bounded_heuristic_v1",
+                },
+                "rbi2": {
+                    "status": "rbi2_learning_period",
+                    "observed_days": 1.0,
+                    "minimum_days": 7.0,
+                    "independent_event_count": 3,
+                    "required_independent_events": 24,
+                },
+                "risk": {
+                    "max_qty_per_position": 15,
+                    "base_position_cap_usd": 10.0,
+                    "max_risk_per_event_pct": 0.08,
+                    "max_deployed_pct": 0.90,
+                    "minimum_model_headroom_f": 2.0,
+                },
+            },
         },
     )
     monkeypatch.setattr(
@@ -466,6 +489,10 @@ def test_operator_brief_summarizes_live_truth_in_plain_english(monkeypatch):
     assert "Book sync: broker and database do NOT agree." in output
     assert "Pending change requests: 1" in output
     assert "Main blocker: release_audit_pending_new_build" in output
+    assert "Build: v19.20.0 (2cff745)" in output
+    assert "Entry execution: taker_only_ioc" in output
+    assert "RBI 2.0: rbi2_learning_period; 1.0/7 days, 3/24 official events" in output
+    assert "2F headroom" in output
 
 
 def test_trading_readiness_summary_explains_blockers_in_plain_english(monkeypatch):
@@ -525,6 +552,100 @@ def test_telegram_surface_exposes_plain_english_operator_shortcuts():
     assert 'CommandHandler("why", why_command)' in text
     assert 'CommandHandler("changes", changes_command)' in text
     assert "/brief - plain-English health summary and what needs attention" in text
+    assert 'CommandHandler("reboot"' not in text
+    assert "os._exit" not in text
+
+
+def test_brain_surfaces_have_no_direct_mutation_tools():
+    from runtime import brain
+
+    registry = brain.get_registry()
+    assert brain._WRITE_SURFACES == set()
+    assert not {name for name, tool in registry.items() if tool.tier == brain.WRITE}
+    for forbidden in {"replace_text", "run_safe_command", "run_release_audit"}:
+        assert forbidden not in registry
+    for surface in (brain.COCKPIT, brain.TELEGRAM):
+        names = {getattr(fn, "__name__", "") for fn in brain.tools_for(surface)}
+        assert "request_change" in names
+        assert "get_production_policy_status" in names
+
+
+def test_telegram_rbi_copy_does_not_activate_unpromoted_evidence():
+    from notifications.telegram_bot import _format_rbi_status
+
+    line = _format_rbi_status(
+        {
+            "status": "rbi2_learning_period",
+            "adaptive_active": False,
+            "global_blend": {"sample_size": 12, "gfs_weight": 0.52, "ecmwf_weight": 0.48},
+            "learning_gate": {
+                "observed_days": 3.5,
+                "minimum_days": 7.0,
+                "independent_event_count": 12,
+                "required_independent_events": 24,
+            },
+        }
+    )
+
+    assert "governed GFS=60% ECMWF=40% baseline remains active" in line
+    assert "3.5/7 days" in line
+    assert "12/24 independent events" in line
+    assert "human promotion required" in line
+
+
+def test_mobile_hud_uses_runtime_caps_and_current_decision_policy(monkeypatch):
+    from notifications import sovereign_mobile_hud as hud
+
+    monkeypatch.setattr(
+        hud,
+        "get_system_vitals",
+        lambda: {
+            "version": "19.20.0",
+            "short_sha": "2cff745",
+            "uptime": "1h 2m",
+            "integrity": 100,
+        },
+    )
+    state = {
+        "balance": 58.73,
+        "positions": [],
+        "hubs": {"MIDWEST": 20.0},
+        "release_verdict": "READY_FOR_LIVE",
+        "entries_allowed": True,
+        "drift": {"has_drift": False},
+        "broker_connected": True,
+        "production_policy": {
+            "risk": {
+                "max_concurrent_positions": 20,
+                "base_position_cap_usd": 10.0,
+                "max_risk_per_event_pct": 0.08,
+                "max_deployed_pct": 0.90,
+                "minimum_model_headroom_f": 2.0,
+                "hub_exposure_cap_usd": 23.49,
+                "hub_exposure_rule": "max($20, 40% of live balance)",
+            },
+            "rbi2": {
+                "status": "rbi2_learning_period",
+                "observed_days": 1.0,
+                "minimum_days": 7.0,
+                "independent_event_count": 2,
+                "required_independent_events": 24,
+            },
+        },
+    }
+    monkeypatch.setattr(hud, "get_kalshi_state", lambda: state)
+
+    main = hud.build_main_menu_msg()
+    philosophy = hud.build_philosophy_msg()
+    deep_dive = hud.build_kalshi_deep_dive_msg()
+
+    assert "Positions: 0/20" in main
+    assert "Execution: taker-only IOC" in main
+    assert "RBI: rbi2_learning_period (1.0/7 days, 2/24 events)" in main
+    assert "No commercial Open-Meteo ensemble is used" in philosophy
+    assert "METAR cooling veto can block an entry" in philosophy
+    assert "exit early if airport sensors" not in philosophy
+    assert "Cap: $23.49 (max($20, 40% of live balance))" in deep_dive
 
 
 def test_execution_cycle_stamps_lane_heartbeat_before_the_entry_gate(

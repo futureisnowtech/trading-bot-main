@@ -44,4 +44,4 @@ This document catalogues software versions, historical bug fixes, and active SRE
 
 ### 3.3 Resolved Adaptive-Weight Disconnect
 *   *Historical risk*: Adaptive weights were inactive.
-*   *Resolution*: The 2026-08-24 v19.20 candidate consumes explicitly promoted RBI 2.0 weights in the deterministic GFS/ECMWF blend; ICON and the commercial ensemble path are excluded.
+*   *Resolution*: The deployed v19.20 system consumes explicitly promoted RBI 2.0 weights in the deterministic GFS/ECMWF blend; ICON and the commercial ensemble path are excluded.

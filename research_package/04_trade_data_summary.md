@@ -6,9 +6,9 @@ This document describes the structure, locations, fields, and metrics of all his
 
 ## 1. Trade Storage Locations
 
-*   **Primary Database Table**: `trades` table inside [`logs/trades.db`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/trades.db).
-*   **Reconstruction Script**: [`scripts/pull_and_reconstruct_kalshi_data.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/scripts/pull_and_reconstruct_kalshi_data.py) was executed to download data from Kalshi.
-*   **Normalized Research Export**: [`/research_package/normalized_trades.csv`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/normalized_trades.csv) containing 1,470 rows.
+*   **Primary Database Table**: `trades` table inside [`logs/trades.db`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/logs/trades.db).
+*   **Reconstruction Script**: [`scripts/pull_and_reconstruct_kalshi_data.py`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/scripts/pull_and_reconstruct_kalshi_data.py) was executed to download data from Kalshi.
+*   **Normalized Research Export**: [`/research_package/normalized_trades.csv`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/research_package/normalized_trades.csv) containing 1,470 rows.
 
 ---
 

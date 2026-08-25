@@ -3,13 +3,14 @@
 ## Proven production eras
 
 - **2026-07-24 through 2026-08-11:** NYC remained on commit `603a42a9da129d11e43c41e2a85228cb6b174d6f` (`VERSION.py` 19.10.12), even while later v19.11-v19.18 commits and documentation accumulated in Git. The deploy record attributes this to a dormant protected deployment path and failing/untriggered CI, not to those tagged releases running live.
-- **2026-08-21 onward (verified 2026-08-24):** NYC runs commit `0ab0300a67edc19ca5a4f73e852f690376685ff4` (`VERSION.py` 19.18.0). The running container's tracked source files hash-match that checkout.
+- **2026-08-21 through 2026-08-25:** NYC ran commit `0ab0300a67edc19ca5a4f73e852f690376685ff4` (`VERSION.py` 19.18.0).
+- **2026-08-25 onward:** NYC runs the v19.20 production architecture. The exact SHA is read from `/home/algo-runner/bot/version.txt`, its deploy manifest copies, and container `BUILD_SHA`; those values must match `origin/master`.
 
-NYC has no commercial Open-Meteo key. Its current fallback requests deterministic GFS and ECMWF successfully, but its old `gfs_graphcast025` request returns null forecast arrays; therefore live `q_hat` is currently driven by GFS/ECMWF, with optional HRRR where the strategy supports it. ICON and the AI uncertainty feed are not live-active.
+NYC has no commercial Open-Meteo key. Production requests keyless deterministic GFS, ECMWF, and supported NCEP AIGFS, with optional HRRR and METAR where the strategy supports them. AIGFS disagreement scales uncertainty and has no voting weight; ICON and the commercial ensemble path are absent.
 
 The important continuity is that both proven endpoints use the canonical `forecast.pricing_engine.calculate_pricing()` production branch. Later releases changed calibration, physics, execution, and risk details, so the entire July-to-present period must not be described as one unchanged algorithm.
 
-## What the v19.20.0 source candidate creates
+## What v19.20.0 runs in production
 
 1. `data/kalshi_weather_monitor.py` fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS forecasts, then attaches METAR and HRRR data where available. There is no commercial ensemble/key branch and no ICON input.
 2. The top-level provider identity is always GFS. If GFS is absent, the bundle fails closed instead of copying ECMWF or AIGFS into the GFS slot. Partial real models remain missing rather than being converted into fake neutral probabilities.
@@ -23,7 +24,7 @@ The important continuity is that both proven endpoints use the canonical `foreca
 
 ## RBI 2.0 learning period
 
-The candidate starts a versioned evidence epoch named
+Production uses a versioned evidence epoch named
 `v19.20.0-deterministic-physics-path`. Predictions from earlier probability paths do
 not count toward this epoch. RBI remains on the governed 60/40 GFS/ECMWF
 baseline until current-epoch, officially settled evidence spans at least seven
@@ -37,7 +38,7 @@ bypass the learning period.
 ## Repaired discrepancies from the old system
 
 - The commercial ensemble/ICON candidate was removed, including its environment and deployment configuration. Persisted ICON data is cleared during projection so an old snapshot cannot restore it.
-- The old AI path requested retired identifier `gfs_graphcast025`, which currently returns HTTP 200 with null forecast arrays, and its scaler compared model output with the contract strike. The candidate requests supported `ncep_aigfs025` from the GFS endpoint and passes the actual AIGFS forecast into `calculate_aigfs_lambda()`.
+- The old AI path requested retired identifier `gfs_graphcast025`, which returned HTTP 200 with null forecast arrays, and its scaler compared model output with the contract strike. Production requests supported `ncep_aigfs025` from the GFS endpoint and passes the actual AIGFS forecast into `calculate_aigfs_lambda()`.
 - `calculate_brier_weights()` used to reference an unimported `DB_PATH`; its broad exception handler hid the error and always returned 60/40. Promoted RBI weights now load on the production call path.
 - `get_dynamic_param()` also referenced an unimported `sqlite3`; the swallowed exception made operator overrides inert. The import is restored and proof-covered behavior now follows one canonical runtime path.
 - HRRR hydration wrote inside `intraday` while pricing read the top level, and one-member sigma was stored but ignored. Both values now reach pricing.
@@ -48,4 +49,4 @@ bypass the learning period.
 
 The former unconditional `convergence_multiplier = 1.5` and inert `divergence_size_multiplier = 1.0` have been replaced by the selected legacy guardrail described above. The guardrail is a hard veto only above a 70-point maximum physical-model gap; the 20-to-70-point region is deliberately a soft probability and size penalty.
 
-Quarter Kelly is active. The candidate additionally enforces `KALSHI_KELLY_CAP=0.12` against fee-inclusive order cost and `KALSHI_MAX_RISK_PER_EVENT_PCT=0.08` against aggregate family exposure. Quantity/dollar position clamps, deployed-cap gate, concurrent/family counts, broker exposure, regional cap, and a fail-closed covariance budget remain additive protections.
+Quarter Kelly is active. Production enforces `KALSHI_KELLY_CAP=0.12` against fee-inclusive order cost and `KALSHI_MAX_RISK_PER_EVENT_PCT=0.08` against aggregate family exposure. Quantity/dollar position clamps, deployed-cap gate, concurrent/family counts, broker exposure, regional cap, and a fail-closed covariance budget remain additive protections.

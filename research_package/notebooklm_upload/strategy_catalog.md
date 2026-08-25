@@ -6,7 +6,7 @@ This catalog details the rules, probability models, safety gates, and exit logic
 
 ## 1. Unified Strategy: `weather_physics`
 
-The v19.20 candidate uses a single strategy named **`weather_physics`**. It merges deterministic numerical forecasts with explicit uncertainty and bounded temperature physics, evaluates odds, and manages exits. Deployed v19.18 still records the legacy `weather_ensemble` label.
+The deployed v19.20 system uses a single strategy named **`weather_physics`**. It merges deterministic numerical forecasts with explicit uncertainty and bounded temperature physics, evaluates odds, and manages exits.
 
 ### 1.1 Deterministic Physical-Model Blend
 The baseline probability estimate ($q_{\text{hat}}$) uses promoted relative GFS/ECMWF skill weights, model/horizon predictive-error sigma, and mode-aware temperature physics before the CDF. Commercial ensembles and ICON are absent. Unanimous same-tail GFS/ECMWF agreement earns $1.5\text{x}$; a probability gap above 20 points reduces probability and size, and above 70 points vetoes the trade.

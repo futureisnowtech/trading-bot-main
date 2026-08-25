@@ -23,7 +23,7 @@ The system runs two long-lived python processes on a remote server:
 
 The bot requires three datasets to evaluate trades:
 
-*   **Weather Forecasts**: The v19.20 candidate pulls keyless deterministic GFS, ECMWF, and NCEP AIGFS from Open-Meteo and caches contract-projectable values plus predictive sigma in `logs/weather_snapshot.json`; commercial ensembles and ICON are absent.
+*   **Weather Forecasts**: Deployed v19.20 pulls keyless deterministic GFS, ECMWF, and NCEP AIGFS from Open-Meteo and caches contract-projectable values plus predictive sigma in `logs/weather_snapshot.json`; commercial ensembles and ICON are absent.
 *   **Order Book Quotes**: The quote harvester fetches paired bid/ask levels from Kalshi and caches them to `forecast_quotes` in `logs/trades.db`.
 *   **Intraday Observations (METAR)**: Scraping NOAA METAR reports updates real-time temperature boundaries in `logs/weather_watermarks.json` to manage exits.
 

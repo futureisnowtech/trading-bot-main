@@ -39,26 +39,27 @@ def _is_duplicate(user_id: int, query: str) -> Optional[str]:
     Returns rejection message if duplicate/rate-limited, else None.
     """
     now = time.time()
-    
+
     # 5s per-user rate limit
     last_time = _LAST_QUERY_TIME.get(user_id, 0)
     if now - last_time < 5:
         return f"⏳ Rate limit: Please wait {5 - int(now - last_time)}s."
-    
+
     # 60s query hash dedupe
     q_hash = hashlib.sha256(query.strip().lower().encode()).hexdigest()
     if q_hash in _QUERY_HASH_CACHE:
         if now - _QUERY_HASH_CACHE[q_hash] < 60:
             return "🔁 Duplicate query detected. Please wait 60s before repeating the same question."
-    
+
     _LAST_QUERY_TIME[user_id] = now
     _QUERY_HASH_CACHE[q_hash] = now
-    
+
     # Cleanup old hashes (simple LRU)
     if len(_QUERY_HASH_CACHE) > 100:
         expired = [k for k, v in _QUERY_HASH_CACHE.items() if now - v > 60]
-        for k in expired: del _QUERY_HASH_CACHE[k]
-        
+        for k in expired:
+            del _QUERY_HASH_CACHE[k]
+
     return None
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,30 @@ def _load_forecast_snapshot() -> dict:
     return {}
 
 
+def _format_rbi_status(learning: dict) -> str:
+    """Render governed RBI state without mistaking evidence for active weights."""
+    gate = learning.get("learning_gate") or {}
+    status = str(learning.get("status") or "unknown")
+    days = float(gate.get("observed_days") or 0.0)
+    minimum_days = float(gate.get("minimum_days") or 0.0)
+    events = int(gate.get("independent_event_count") or 0)
+    required_events = int(gate.get("required_independent_events") or 0)
+    if learning.get("adaptive_active"):
+        global_blend = learning.get("global_blend") or {}
+        return (
+            f"RBI 2.0: learned champion active; "
+            f"GFS={float(global_blend.get('gfs_weight') or 0.60):.0%} "
+            f"ECMWF={float(global_blend.get('ecmwf_weight') or 0.40):.0%}; "
+            f"official epoch evidence {days:.1f}/{minimum_days:g} days, "
+            f"{events}/{required_events} independent events"
+        )
+    return (
+        f"RBI 2.0: {status}; governed GFS=60% ECMWF=40% baseline remains active; "
+        f"official epoch evidence {days:.1f}/{minimum_days:g} days, "
+        f"{events}/{required_events} independent events; human promotion required"
+    )
+
+
 def _build_local_audit_snapshot() -> tuple[str, str]:
     """Build a dashboard-free audit snapshot directly from DB and process state."""
     from runtime.incident_tracker import get_incident_summary
@@ -172,14 +197,6 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         active_markets_row = conn.execute(
             "SELECT COUNT(*) AS n FROM forecast_markets WHERE active=1"
         ).fetchone()
-        open_positions = conn.execute(
-            """
-            SELECT ticker, qty, entry_price, side
-            FROM forecast_positions
-            WHERE active = 1 AND qty > 0
-            ORDER BY opened_at ASC
-            """
-        ).fetchall()
         rbi_row = conn.execute(
             """
             SELECT brier_score, win_rate, ensemble_accuracy, sample_size
@@ -204,7 +221,10 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
     drift = truth.get("position_drift", {})
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
     learning = truth.get("weather_learning") or {}
-    learning_global = learning.get("global_blend") or {}
+    policy = truth.get("production_policy") or {}
+    execution_policy = policy.get("execution") or {}
+    probability_policy = policy.get("probability") or {}
+    risk_policy = policy.get("risk") or {}
     release_verdict = str(release.get("current_release_verdict") or "UNKNOWN")
     entries_allowed = bool(release.get("entries_allowed"))
     provider_mode = str(release.get("provider_mode") or "unknown")
@@ -214,9 +234,20 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         f"Hourly Support: {int(hourly_support.get('resolver_ready_city_count') or 0)}/"
         f"{int(hourly_support.get('universe_city_count') or 0)} cities registry-mapped"
     )
+    risk_line = (
+        "Risk Caps: "
+        f"{int(risk_policy.get('max_qty_per_position') or 0)} contracts / "
+        f"${float(risk_policy.get('base_position_cap_usd') or 0.0):g} base position / "
+        f"{float(risk_policy.get('max_risk_per_event_pct') or 0.0):.0%} event / "
+        f"{float(risk_policy.get('max_deployed_pct') or 0.0):.0%} deployed / "
+        f"{float(risk_policy.get('minimum_model_headroom_f') or 0.0):g}F headroom"
+    )
 
     msg_lines = [
-        "<b>SOVEREIGN KALSHI AUDIT</b>",
+        (
+            f"<b>SOVEREIGN KALSHI AUDIT v{policy.get('version') or 'unknown'} "
+            f"({policy.get('short_sha') or 'SHA unavailable'})</b>"
+        ),
         f"Status: {health}",
         f"Readiness: {readiness}",
         f"Release Gate: {release_verdict}",
@@ -229,6 +260,10 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         f"Equity: ${balance:,.2f}",
         f"Open Positions: {broker_positions_count}",
         f"Provider Mode: {provider_mode}",
+        f"Execution: {execution_policy.get('entry_route') or 'unknown'}",
+        f"Probability Path: {probability_policy.get('model_path') or 'unknown'}",
+        f"Physics: {probability_policy.get('physics_method') or 'unknown'}",
+        risk_line,
         hourly_support_line,
     ]
     raw_lines.extend(
@@ -243,17 +278,15 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
             f"Equity: ${balance:,.2f}",
             f"Open Positions: {broker_positions_count}",
             f"Provider Mode: {provider_mode}",
+            f"Execution: {execution_policy.get('entry_route') or 'unknown'}",
+            f"Probability Path: {probability_policy.get('model_path') or 'unknown'}",
+            f"Physics: {probability_policy.get('physics_method') or 'unknown'}",
+            risk_line,
             hourly_support_line,
         ]
     )
 
-    if int(learning_global.get("sample_size") or 0) > 0:
-        gfs_weight = float(learning_global.get("gfs_weight") or 0.60)
-        ec_weight = float(learning_global.get("ecmwf_weight") or 0.40)
-        sample_size = int(learning_global.get("sample_size") or 0)
-        line = f"Adaptive Blend: GFS={gfs_weight:.0%} ECMWF={ec_weight:.0%} n={sample_size}"
-    else:
-        line = "Adaptive Blend: governed deterministic GFS=60% ECMWF=40% baseline during the mandatory 7-day current-epoch learning gate; AIGFS scales uncertainty and ICON is absent"
+    line = _format_rbi_status(learning)
     msg_lines.append(line)
     raw_lines.append(line)
 
@@ -275,9 +308,12 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
     broker_positions = truth.get("broker_positions") or []
     if broker_positions:
         for pos in broker_positions[:8]:
+            held_entry = pos.get("held_side_entry_price")
+            if held_entry is None:
+                held_entry = pos.get("entry_price")
             line = (
                 f"• {pos['ticker']}: {pos['side']} x{float(pos['qty'] or 0):g} "
-                f"@ ${float(pos['entry_price'] or 0.0):.2f}"
+                f"@ ${float(held_entry or 0.0):.2f}"
             )
             msg_lines.append(line)
             raw_lines.append(line)
@@ -319,6 +355,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     truth = get_live_kalshi_status()
     release = get_release_status(truth=truth)
+    policy = truth.get("production_policy") or {}
+    execution_policy = policy.get("execution") or {}
+    probability_policy = policy.get("probability") or {}
+    rbi_policy = policy.get("rbi2") or {}
+    risk_policy = policy.get("risk") or {}
     balance = float(truth.get("balance_usd") or 0.0)
     active_markets = int(truth.get("active_markets") or 0)
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
@@ -330,7 +371,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with sqlite3.connect(DB_PATH, timeout=30.0) as c:
             row = c.execute("SELECT SUM(usd_cost) FROM api_costs WHERE ts > ?", (time.time() - 86400,)).fetchone()
             usd_spent = float(row[0] or 0.0)
-    except: pass
+    except Exception:
+        pass
 
     msg = (
         f"<b>KALSHI WEATHER ENGINE: LIVE</b>\n"
@@ -341,6 +383,19 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Release Gate: {release.get('current_release_verdict')}\n"
         f"Entries Allowed: {'YES' if release.get('entries_allowed') else 'NO'}\n"
         f"Provider Mode: {release.get('provider_mode') or 'unknown'}\n"
+        f"Build: v{policy.get('version') or 'unknown'} ({policy.get('short_sha') or 'SHA unavailable'})\n"
+        f"Execution: {execution_policy.get('entry_route') or 'unknown'}\n"
+        f"Probability: {probability_policy.get('model_path') or 'unknown'}\n"
+        f"Physics: {probability_policy.get('physics_method') or 'unknown'}\n"
+        f"RBI Gate: {rbi_policy.get('status') or 'unknown'}; "
+        f"{float(rbi_policy.get('observed_days') or 0.0):.1f}/"
+        f"{float(rbi_policy.get('minimum_days') or 0.0):g} days, "
+        f"{int(rbi_policy.get('independent_event_count') or 0)}/"
+        f"{int(rbi_policy.get('required_independent_events') or 0)} official events\n"
+        f"Risk: {int(risk_policy.get('max_qty_per_position') or 0)} contracts / "
+        f"${float(risk_policy.get('base_position_cap_usd') or 0.0):g} base position / "
+        f"{float(risk_policy.get('max_risk_per_event_pct') or 0.0):.0%} event / "
+        f"{float(risk_policy.get('minimum_model_headroom_f') or 0.0):g}F headroom\n"
         f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
         f"Infra Blockers: {len(release.get('top_infrastructure_blockers') or [])}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"
@@ -445,18 +500,15 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         msg = "<b>Active Forecast Positions</b>\n"
         for r in rows:
-            msg += f"🎫 {r['ticker']} | {r['side']} x{float(r['qty'] or 0):g} @ ${float(r['entry_price'] or 0):.2f}\n"
+            held_entry = r.get("held_side_entry_price")
+            if held_entry is None:
+                held_entry = r.get("entry_price")
+            msg += f"🎫 {r['ticker']} | {r['side']} x{float(r['qty'] or 0):g} @ ${float(held_entry or 0):.2f}\n"
         if drift.get("has_drift"):
             msg += "\n⚠️ Truth drift detected between broker and DB."
         await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         await _reply_text(update, f"Error fetching positions: {e}")
-
-
-@restricted_access
-async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _reply_text(update, "Restarting bot process...")
-    os._exit(0)
 
 
 @restricted_access
@@ -472,22 +524,22 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "\n🔮 <b>ORACLE STRATEGIC ANALYSIS:</b>\n"
         if update.message:
             await update.message.reply_chat_action(ChatAction.TYPING)
-        
+
         prompt = (
             "You are the Sovereign SRE Oracle for the Kalshi Weather Engine. "
             "Analyze this system audit snapshot. Identify any strategic gaps or risk anomalies.\n\n"
             f"### AUDIT SNAPSHOT ###\n{raw_text}"
         )
-        
+
         try:
             analysis = await asyncio.wait_for(asyncio.to_thread(ask_ai, prompt), timeout=60.0)
             msg += f"<i>{escape(analysis or 'AI returned no content.', quote=False)}</i>"
         except Exception as ai_err:
             msg += f"<i>Oracle analysis failed: {ai_err}</i>"
-            
+
     except Exception as e:
         msg += f"⚠️ <b>WARNING:</b> Local audit snapshot failed: {e}\n"
-        
+
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
@@ -495,7 +547,7 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
+
     try:
         with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             conn.row_factory = sqlite3.Row
@@ -511,7 +563,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             for p in closed:
                 msg += f"- {p['ticker']}: {p['qty']} {p['side']} ({p['exit_type']})\n"
-            
+
         await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         await _reply_text(update, f"Error generating report: {e}")
@@ -544,7 +596,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _handle_ai_query(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     user = getattr(update, "effective_user", None)
     user_id = user.id if user else 0
-    
+
     rejection = _is_duplicate(user_id, query)
     if rejection:
         await _reply_text(update, f"⚠️ {rejection}")
@@ -556,11 +608,13 @@ async def _handle_ai_query(update: Update, context: ContextTypes.DEFAULT_TYPE, q
         pass
 
     thinking_msg = await _reply_text(update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML)
-    if thinking_msg is None: return
+    if thinking_msg is None:
+        return
 
     try:
         response = await asyncio.wait_for(asyncio.to_thread(ask_ai, query), timeout=100.0)
-        if response is None: response = "Error: AI Agent returned a null response."
+        if response is None:
+            response = "Error: AI Agent returned a null response."
         chunks = chunk_message(escape(response, quote=False))
 
         await thinking_msg.edit_text(chunks[0], parse_mode=ParseMode.HTML)
@@ -573,7 +627,8 @@ async def _handle_ai_query(update: Update, context: ContextTypes.DEFAULT_TYPE, q
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query is None: return
+    if query is None:
+        return
     await query.answer()
 
     if query.data == "hud_main_menu":
@@ -602,7 +657,6 @@ async def run_bot():
         app.add_handler(CommandHandler("logs", logs_command))
         app.add_handler(CommandHandler("metrics", metrics_command))
         app.add_handler(CommandHandler("positions", positions_command))
-        app.add_handler(CommandHandler("reboot", reboot_command))
         app.add_handler(CommandHandler("audit", audit_command))
         app.add_handler(CommandHandler("report", report_command))
         app.add_handler(CommandHandler("uptime", uptime_command))
@@ -634,8 +688,10 @@ def start_bot_thread():
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(run_bot())
-        except Exception: pass
-        finally: loop.close()
+        except Exception:
+            pass
+        finally:
+            loop.close()
 
     import threading
     t = threading.Thread(target=_run, daemon=True, name="TelegramBotThread")

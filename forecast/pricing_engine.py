@@ -20,6 +20,7 @@ _PRECIP_STEEPNESS = 12.0
 _WIND_MIDPOINT = 14.5    # mph
 _WIND_STEEPNESS = 0.35
 PHYSICS_METHOD = "bounded_heuristic_v1"
+PRODUCTION_MODEL_PATH = "deterministic_gfs_ecmwf_aigfs_hrrr_physics"
 
 
 def _sigmoid_signal(value: float, midpoint: float, steepness: float) -> float:
@@ -499,7 +500,7 @@ def calculate_pricing(
         "gfs_weight": final_weights["gfs"],
         "ecmwf_weight": final_weights["ecmwf"],
         "hrrr_weight": final_weights["hrrr"],
-        "model_path": "deterministic_gfs_ecmwf_aigfs_hrrr_physics",
+        "model_path": PRODUCTION_MODEL_PATH,
         "physics_method": PHYSICS_METHOD,
         "physics_validation_status": "learning_epoch_pending_outcomes",
         "provider_mode": provider_mode,

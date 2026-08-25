@@ -102,10 +102,13 @@ def get_open_positions() -> str:
 
         lines = ["LIVE BROKER POSITIONS:"]
         for pos in positions:
+            held_entry = pos.get("held_side_entry_price")
+            if held_entry is None:
+                held_entry = pos.get("entry_price")
             lines.append(
                 f"  - {pos.get('ticker')} ({pos.get('side')}) | "
                 f"Qty: {float(pos.get('qty') or 0):g} | "
-                f"Entry: ${float(pos.get('entry_price') or 0.0):.2f}"
+                f"Held-side entry: ${float(held_entry or 0.0):.2f}"
             )
         if drift.get("has_drift"):
             lines.append("")
@@ -447,7 +450,17 @@ def get_performance_attribution() -> str:
                 lines.append(f"  {k:10s} n={int(v['n']):3d} win={wr:5.1f}% pnl=${v['pnl']:+7.2f}{extra}")
             return "\n".join(lines)
 
-        return "\n\n".join([render(by_city, "city"), render(by_bucket, "contract type"), render(by_fill, "fill type (inferred)")])
+        return (
+            "Current production entry route: taker-only IOC. The fill-type section "
+            "below is retrospective classification of historical settlements only.\n\n"
+            + "\n\n".join(
+                [
+                    render(by_city, "city"),
+                    render(by_bucket, "contract type"),
+                    render(by_fill, "historical fill type (inferred)"),
+                ]
+            )
+        )
     except Exception as e:
         return f"Error computing performance attribution: {e}"
 
@@ -564,6 +577,11 @@ def get_operator_brief() -> str:
         truth = get_live_kalshi_status()
         release = get_release_status(truth=truth)
         pending = approvals.list_pending()
+        policy = truth.get("production_policy") or {}
+        execution_policy = policy.get("execution") or {}
+        probability_policy = policy.get("probability") or {}
+        rbi_policy = policy.get("rbi2") or {}
+        risk_policy = policy.get("risk") or {}
 
         drift = truth.get("position_drift") or {}
         blockers = release.get("top_infrastructure_blockers") or []
@@ -603,6 +621,33 @@ def get_operator_brief() -> str:
             f"Open incidents: {int((release.get('open_incidents') or {}).get('total_open') or 0)}",
             f"Pending change requests: {pending_count}",
             f"Weather data mode: {release.get('provider_mode') or 'unknown'}",
+            (
+                f"Build: v{policy.get('version') or 'unknown'} "
+                f"({policy.get('short_sha') or 'SHA unavailable'})"
+            ),
+            f"Entry execution: {execution_policy.get('entry_route') or 'unknown'}",
+            (
+                "Probability path: "
+                f"{probability_policy.get('model_path') or 'unknown'} "
+                f"({probability_policy.get('physics_method') or 'physics method unknown'})"
+            ),
+            (
+                "RBI 2.0: "
+                f"{rbi_policy.get('status') or 'unknown'}; "
+                f"{float(rbi_policy.get('observed_days') or 0.0):.1f}/"
+                f"{float(rbi_policy.get('minimum_days') or 0.0):g} days, "
+                f"{int(rbi_policy.get('independent_event_count') or 0)}/"
+                f"{int(rbi_policy.get('required_independent_events') or 0)} official events; "
+                "human promotion required."
+            ),
+            (
+                "Risk ceilings: "
+                f"{int(risk_policy.get('max_qty_per_position') or 0)} contracts / "
+                f"${float(risk_policy.get('base_position_cap_usd') or 0.0):g} base position / "
+                f"{float(risk_policy.get('max_risk_per_event_pct') or 0.0):.0%} per event / "
+                f"{float(risk_policy.get('max_deployed_pct') or 0.0):.0%} deployed / "
+                f"{float(risk_policy.get('minimum_model_headroom_f') or 0.0):g}F headroom."
+            ),
         ]
         if blockers:
             lines.append(f"Main blocker: {blockers[0]}")
@@ -677,18 +722,6 @@ def get_trading_readiness_summary(lookback_hours: int = 24) -> str:
 
 
 # ── Chat execution ──────────────────────────────────────────────────
-
-SYSTEM_PROMPT = (
-    "You are JARVIS, an elite quantitative weather-trading analyst and systems architect. "
-    "Inspect live evidence, RBI 2.0 artifacts, and Cerebro's falsifiable insight archive. Never claim a live mutation occurred: propose governed changes for explicit cockpit approval.\n\n"
-    "DIAGNOSTIC & POST-MORTEM WORKFLOW:\n"
-    "1. When asked about specific trades, dates, or losses, ALWAYS call `search_trades_and_positions` with query keywords, city names (e.g. DC, PHIL), strike temperatures, or PnL ranges (e.g. min_pnl=-10.0, max_pnl=-5.0).\n"
-    "2. Once matching trades/contracts are found, call `get_trade_post_mortem` to extract GFS vs ECMWF model spreads, blended fair values, posterior uncertainty, and official NOAA station ground-truth observations.\n"
-    "3. Synthesize physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), GFS/ECMWF divergence, fee drag, or Kelly sizing factors to explain WHY the trade lost.\n\n"
-    "Format EVERY response using this 2-part structure:\n\n"
-    "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
-    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), deterministic model discrepancy and predictive-error sigma (GFS vs ECMWF), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
-)
 
 
 def get_rbi2_status_summary() -> str:
@@ -873,7 +906,7 @@ def show_panel(name: str) -> str:
 
 
 def run_jarvis_chat(messages: list[dict]) -> str:
-    """Cockpit entrypoint. Delegates to the shared brain with full write access.
+    """Cockpit entrypoint. Delegates to the shared diagnostic-only brain.
 
     The tool-calling loop, model resolution and system prompt now live in
     runtime.brain, shared with the Telegram operator. This wrapper keeps the old

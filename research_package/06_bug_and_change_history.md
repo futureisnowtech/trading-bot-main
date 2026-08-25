@@ -45,15 +45,15 @@ The following bugs were resolved in previous update cycles:
 These issues are present in the current live environment:
 
 ### 3.1 unit Test Pollution of Watermarks (SRE Risk)
-*   *File affected*: [`logs/weather_watermarks.json`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/weather_watermarks.json)
+*   *File affected*: [`logs/weather_watermarks.json`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/logs/weather_watermarks.json)
 *   *Description*: The unit test suite (`tests/proof/test_weather_intraday_watermarks.py`) executes using the production configuration settings. This causes tests to write mock observed temperatures (`74.0`) directly to the production cache.
 *   *Impact*: Corrupts observed temperature boundaries. If the bot evaluates real-time intraday exits (which look up observed highs/lows from watermarks), it will trade/exit on corrupted data.
 
 ### 3.2 Database Timing Mismatch (Execution Sync Bug)
-*   *Tables affected*: `trades` vs `forecast_positions` in [`logs/trades.db`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/trades.db).
+*   *Tables affected*: `trades` vs `forecast_positions` in [`logs/trades.db`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/logs/trades.db).
 *   *Description*: Active positions are logged with an entry price of `0.35` USD, while the `trades` table logs actual fills at `0.01` and `0.07` USD.
 *   *Impact*: The position reconciler was executed immediately after order placement. Because the database trade record was not committed yet or could not be matched at that exact millisecond, the reconciler fell back to the order book's `mid` price ($0.35) and permanently cached it.
 
 ### 3.3 Resolved: Adaptive-weight production disconnect
 *   *Historical description*: An older, uncalled weather learner coexisted with the production pricing path, while a later pricing loader referenced `DB_PATH` without importing it, causing a swallowed exception and 60/40 fallback.
-*   *Resolution (2026-08-25 v19.20 candidate)*: The disconnected learner and its dead schema were removed. `forecast.pricing_engine.calculate_brier_weights()` now reads only explicitly promoted RBI 2.0 champion weights for the deterministic GFS/ECMWF blend. ICON and the commercial ensemble path are excluded.
+*   *Resolution (deployed v19.20)*: The disconnected learner and its dead schema were removed. `forecast.pricing_engine.calculate_brier_weights()` now reads only explicitly promoted RBI 2.0 champion weights for the deterministic GFS/ECMWF blend. ICON and the commercial ensemble path are excluded.

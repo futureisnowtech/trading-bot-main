@@ -22,6 +22,7 @@ def get_repo_context() -> str:
     Builds a rich context for the AI, including dynamic SQL schema, live config parameters, and runtime status.
     """
     context = []
+    live_status: dict = {}
 
     # 1. Canonical Truth (AGENTS.md & GEMINI.md)
     try:
@@ -31,7 +32,8 @@ def get_repo_context() -> str:
         if os.path.exists("GEMINI.md"):
             with open("GEMINI.md", "r") as f:
                 context.append("### GEMINI.md (Operating Truth)\n" + f.read())
-    except Exception: pass
+    except Exception:
+        pass
 
     # 2. Live Risk & System Configuration Parameters
     try:
@@ -73,7 +75,7 @@ def get_repo_context() -> str:
                     cur.execute(f"SELECT COUNT(*) FROM {t}")
                     cnt = cur.fetchone()[0]
                     schema_info[t] = {"row_count": cnt, "columns": cols}
-                
+
                 # Hydrate active trades
                 # forecast_positions has entry_price/opened_at, not price/timestamp.
                 # The wrong names raised OperationalError, which the bare except
@@ -87,7 +89,7 @@ def get_repo_context() -> str:
                     dict(zip(["ticker", "side", "entry_price", "qty", "opened_at"], r))
                     for r in cur.fetchall()
                 ]
-                
+
             context.append("### DYNAMIC DATABASE SCHEMA (trades.db)\n" + json.dumps(schema_info, indent=2))
             context.append("### LIVE ACTIVE FORECAST POSITIONS\n" + json.dumps(active_positions, indent=2))
     except Exception as exc:
@@ -137,28 +139,35 @@ def get_repo_context() -> str:
     except Exception:
         pass
 
+    # 9. Exact build, execution route, probability path, RBI gate, and risk limits.
+    try:
+        policy_status = live_status.get("production_policy") or json.loads(
+            agent_tools.get_production_policy_status()
+        )
+        context.append("### PRODUCTION POLICY TRUTH\n" + json.dumps(policy_status, indent=2))
+    except Exception:
+        pass
+
     return "\n\n".join(context)
 
 def execute_sql(query: str) -> str: return agent_tools.execute_sql(query)
 def read_file(file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str: return agent_tools.read_file(file_path, start_line, end_line)
 def list_files(dir_path: str = ".") -> str: return agent_tools.list_files(dir_path)
-def replace_text(file_path: str, old_string: str, new_string: str) -> str: return agent_tools.replace_text(file_path, old_string, new_string)
-def run_safe_command(command: str) -> str: return agent_tools.run_safe_command(command)
 def get_live_kalshi_status() -> str: return agent_tools.get_live_kalshi_status()
 def get_recent_veto_summary() -> str: return agent_tools.get_recent_veto_summary()
 def get_recent_execution_summary() -> str: return agent_tools.get_recent_execution_summary()
 def get_weather_learning_status() -> str: return agent_tools.get_weather_learning_status()
+def get_production_policy_status() -> str: return agent_tools.get_production_policy_status()
 def get_release_status() -> str: return agent_tools.get_release_status()
 def run_kalshi_diagnostic() -> str: return agent_tools.run_kalshi_diagnostic()
 def run_storage_audit() -> str: return agent_tools.run_storage_audit()
-def run_release_audit(command: str) -> str: return agent_tools.run_release_audit(command)
 
 def ask_ai(query: str) -> str:
     """Telegram entrypoint. Delegates to the shared brain with read-only access.
 
     The tool-calling loop and system prompt now live in runtime.brain, shared with the
-    cockpit orb. Telegram is restricted to read-tier tools, so a mistyped message
-    cannot patch live trading code; write tools must be run from the cockpit.
+    cockpit orb. Both conversational surfaces are diagnostic-only; changes are
+    queued through ``request_change`` for explicit governed approval.
     """
     from runtime import brain
 

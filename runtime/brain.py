@@ -10,12 +10,10 @@ entrypoints remain as thin wrappers, so no call site had to change.
 
 Permission tiers
 ----------------
-Tools are ``read`` or ``write``. The cockpit gets everything; Telegram gets read-tier
-only, so a mistyped phone message cannot patch live trading code. Enforcement is in two
-places on purpose: the write tools are omitted from the tool list handed to the model,
-*and* each write tool is wrapped in a guard that re-checks the active surface. The
-second check is what holds if a model invents a tool name or the SDK's automatic
-function calling is pointed at a stale list.
+Both AI surfaces receive read-tier tools plus ``request_change``, which creates a
+governed proposal but cannot execute it.  Mutations are resolved by explicit cockpit
+approval outside this model tool loop.  The tier guard remains defense in depth if a
+write tool is ever registered in the future.
 """
 
 from __future__ import annotations
@@ -44,8 +42,8 @@ WRITE = "write"
 COCKPIT = "cockpit"
 TELEGRAM = "telegram"
 
-# Surfaces allowed to run write-tier tools.
-_WRITE_SURFACES = {COCKPIT}
+# No conversational AI surface may directly run a write-tier tool.
+_WRITE_SURFACES: set[str] = set()
 
 _CURRENT_SURFACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "brain_surface", default=COCKPIT
@@ -124,6 +122,7 @@ def _build_registry() -> dict[str, Tool]:
     add(at.get_recent_veto_summary, READ)
     add(at.get_recent_execution_summary, READ)
     add(at.get_weather_learning_status, READ)
+    add(at.get_production_policy_status, READ)
     add(at.get_release_status, READ)
     add(at.run_kalshi_diagnostic, READ)
     add(at.run_storage_audit, READ)
@@ -132,13 +131,6 @@ def _build_registry() -> dict[str, Tool]:
     # execute_sql enforces SELECT/WITH/PRAGMA and sets PRAGMA query_only, so it cannot
     # mutate; it is genuinely read-tier despite the scary name.
     add(at.execute_sql, READ)
-    # run_safe_command allowlists shell, but the allowlist includes bare `sqlite3`,
-    # which can mutate. Treated as write-tier.
-    add(at.run_safe_command, WRITE)
-    add(at.replace_text, WRITE)
-    # run_release_audit can --promote, which changes whether live entries are allowed.
-    add(at.run_release_audit, WRITE)
-
     return registry
 
 
@@ -178,11 +170,9 @@ def _system_instruction(surface: str) -> str:
         context = "(repo context unavailable)"
 
     scope = (
-        "You have full read and write access, including code patching and parameter changes."
-        if surface in _WRITE_SURFACES
-        else "You have READ-ONLY access. Tools that modify the system are unavailable here. "
-        "If asked to change something, use request_change to queue it for one-tap cockpit "
-        "approval instead of just refusing -- that is the intended path from this surface."
+        "You have READ-ONLY diagnostic access. Direct code, shell, release, and parameter "
+        "mutation tools are unavailable. If asked to change something, use request_change "
+        "to queue a governed proposal for explicit cockpit approval."
     )
 
     return (
@@ -198,7 +188,13 @@ def _system_instruction(surface: str) -> str:
         "5. NO HALLUCINATIONS: if a tool returns nothing, say so plainly.\n"
         "6. TRUTH BUCKETS: separate verified facts, inferred causes, and unverified items.\n"
         "7. DO NOT COLLAPSE DISTINCT FAILURE MODES: vetoes, execution blocks, and "
-        "post-submit depth failures are separate categories.\n\n"
+        "post-submit depth failures are separate categories.\n"
+        "8. PRODUCTION INVARIANTS: current entries are taker-only IOC; the probability "
+        "path is deterministic GFS/ECMWF plus actual AIGFS disagreement, optional HRRR, "
+        "and bounded physics; there is no commercial Open-Meteo ensemble. RBI 2.0 may "
+        "collect official evidence during its gate, but learned weights are not active "
+        "until at least seven days and 24 independent events pass and a human promotes "
+        "the challenger. Use get_production_policy_status for exact current values.\n\n"
         f"### ACCESS SCOPE ###\n{scope}\n\n"
         f"### CONTEXTUAL TRUTH ###\n{context}"
     )

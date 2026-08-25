@@ -1,8 +1,9 @@
 """
 notifications/notification_engine.py — v10 notification system.
 
-Replaces Telegram entirely. All events are written to the `notifications` SQLite
-table and consumed by the dashboard's right-side panel.
+All events are written to the `notifications` SQLite table and consumed by the
+dashboard; critical, trade, kill-switch, and explicit operator events are also
+mirrored to Telegram through the allowlisted dispatch boundary.
 
 Eight notification categories:
     TRADE_OPEN    — new position entered

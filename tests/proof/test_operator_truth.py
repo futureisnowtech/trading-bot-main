@@ -58,6 +58,8 @@ def test_live_kalshi_status_is_broker_first_and_surfaces_drift(proof_runtime, mo
     assert payload["db_positions_count"] == 1
     assert payload["forecast_lane"]["readiness_state"] == "OPERATIONAL"
     assert "weather_learning" in payload
+    assert payload["production_policy"]["execution"]["entry_route"] == "taker_only_ioc"
+    assert payload["production_policy"]["probability"]["physics_method"] == "bounded_heuristic_v1"
     assert payload["position_drift"]["has_drift"] is True
     assert payload["position_drift"]["broker_only"][0]["ticker"] == "KXHIGHLAX-26JUN05-B69.5"
     assert payload["position_drift"]["db_only"][0]["ticker"] == "KXHIGHNY-26JUN05-B89.5"
@@ -104,6 +106,45 @@ def test_weather_learning_status_uses_governed_rbi2_champion(proof_runtime, monk
     assert payload["learning_gate"]["minimum_days"] == 7.0
     assert payload["learning_gate"]["passed"] is False
     assert payload["calibration"]["official_outcomes_only"] is True
+
+
+def test_production_policy_status_is_the_shared_operator_contract(proof_runtime, monkeypatch):
+    import runtime.build_info as bi
+    import runtime.operator_truth as ot
+
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {
+            "app_version": "19.20.0",
+            "sha": "2cff745d361ec494",
+            "short_sha": "2cff745",
+            "build_sha": "2cff745d361ec494",
+            "build_short_sha": "2cff745",
+        },
+    )
+    payload = ot.get_production_policy_status(
+        balance_usd=58.73,
+        db_path=str(proof_runtime.db_path),
+    )
+
+    assert payload["version"] == "19.20.0"
+    assert payload["short_sha"] == "2cff745"
+    assert payload["execution"] == {
+        "entry_route": "taker_only_ioc",
+        "resting_entry_orders_allowed": False,
+        "max_entry_slippage": 0.02,
+    }
+    assert payload["probability"]["model_path"] == "deterministic_gfs_ecmwf_aigfs_hrrr_physics"
+    assert payload["probability"]["commercial_open_meteo_ensemble_enabled"] is False
+    assert payload["rbi2"]["minimum_days"] == 7.0
+    assert payload["rbi2"]["required_independent_events"] == 24
+    assert payload["rbi2"]["promotion_mode"] == "human_approved"
+    assert payload["risk"]["max_concurrent_positions"] == 20
+    assert payload["risk"]["max_qty_per_position"] == 15
+    assert payload["risk"]["base_position_cap_usd"] == 10.0
+    assert payload["risk"]["max_risk_per_event_pct"] == 0.08
+    assert payload["risk"]["minimum_model_headroom_f"] == 2.0
 
 
 def test_recent_veto_summary_aggregates_reason_counts(proof_runtime, monkeypatch):

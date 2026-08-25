@@ -10,11 +10,11 @@ Last verified directly against NYC: 2026-08-25
 | Runtime root | `/home/algo-runner/bot` |
 | Containers | `execution-engine`, `kalshi-cockpit` — both up when checked |
 | Images | `ghcr.io/futureisnowtech/trading-bot-main:latest` and dashboard companion |
-| Version | `19.18.0` |
-| SHA / branch | `0ab0300a67edc19ca5a4f73e852f690376685ff4` / `master` |
-| Deploy stamp | `2026-08-21T19:34:54Z` |
+| Version | `19.20.0` |
+| SHA / branch | `master`; read the authoritative runtime stamp for the exact SHA |
+| Verified rollout | Base v19.20 rollout `2cff745d361ec4944605db80b2e1fa32a923745e` at `2026-08-25T04:51:25Z`; later v19.20 observability-only follow-ups must replace this SHA in the runtime stamp |
 | Open-Meteo commercial key | absent |
-| Weather provider actually available | deterministic GFS + ECMWF only; old AI identifier yields null data, and no ICON ensemble |
+| Weather provider actually available | keyless deterministic GFS + ECMWF + NCEP AIGFS disagreement; optional HRRR and METAR; no commercial ensemble and no ICON |
 | City firewall | 27 cities blocked; only CHI, DEN, LAX, OKC, SAT enabled |
 
 The stamped files are authoritative for deployed code identity:
@@ -27,17 +27,12 @@ The stamped files are authoritative for deployed code identity:
 The live database remains canonical for trades and recent runtime evidence:
 `/home/algo-runner/bot/logs/trades.db`.
 
-## Important live-versus-candidate discrepancy
+## Deployed v19.20 system truth
 
-NYC has **not** received the v19.20.0 deterministic-physics repair. Its deployed source
-still requests retired Open-Meteo model identifier `gfs_graphcast025`, which
-currently returns HTTP 200 with null forecast arrays, and the production
-strategy branch still assigns the convergence sizing multiplier as an
-unconditional `1.5`.
-
-The local source candidate is `VERSION.py` 19.20.0 on branch
-`codex/live-policy-truth-alignment`, based on `0ab0300`. The production stamp
-above does not contain this candidate. The candidate:
+NYC received the v19.20 deterministic-physics repair on 2026-08-25. The exact
+deployed SHA is deliberately not duplicated as a supposedly self-updating value
+inside this tracked file: the four runtime stamps above, container `BUILD_SHA`,
+and `origin/master` must agree. The deployed version family:
 
 - removes the commercial Open-Meteo ensemble/key path and ICON dependency;
 - fetches deterministic GFS, ECMWF, and supported `ncep_aigfs025`, failing
@@ -66,10 +61,10 @@ above does not contain this candidate. The candidate:
   settled current-epoch samples exist, after which holdout validation and
   explicit human promotion are still required.
 
-## Candidate proof status
+## Production proof status
 
 The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
-evidence for this refactor. On 2026-08-25, this dirty v19.20.0 candidate passed:
+evidence for this refactor. On 2026-08-25, v19.20.0 passed:
 
 - complete repository suite: 422 passed;
 - clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
@@ -83,11 +78,14 @@ evidence for this refactor. On 2026-08-25, this dirty v19.20.0 candidate passed:
   7.49%, 12 contracts, IOC plan `ready`, and a broker tripwire proving no order
   submission occurred;
 - shadow single-pass runtime completion without authenticating to or reading the
-  live account.
+  live account;
+- protected GitHub CI and protected NYC deployment from the exact authored SHA;
+- an independent in-container hosted audit after deployment: `READY_FOR_LIVE`,
+  zero blockers, fresh deterministic weather, $58.73 broker/runtime balance
+  parity, healthy cockpit, one broker position, and new entries allowed.
 
-No container was restarted and no live order was submitted during these source
-proofs. They prove source/runtime-path compatibility, not deployment; current
-deployment truth must always be read from the stamped files listed above.
+No live order was submitted by the proof commands. Current deployment identity
+must always be read from the stamped files listed above.
 
 ## Effective live risk posture
 
@@ -104,13 +102,13 @@ Verified values include:
 - declared per-event risk: 0.08
 - regional exposure: `max($20, 40% of live cash)`
 
-Those values remain unenforced in deployed v19.18.0. The v19.20.0 source
-candidate enforces both, but they must not be credited as live protection until
-the exact committed candidate is deployed and re-verified.
+Those values are enforced by the v19.20 production strategy and execution path.
+Jarvis and Telegram obtain the same values from `runtime.operator_truth` rather
+than maintaining a second policy description.
 
 ## Deployment boundary
 
-Do not deploy this candidate until all of the following are true:
+Every follow-up deployment must satisfy all of the following:
 
 1. the changes are reviewed, committed, and pushed;
 2. the keyless deterministic provider probe proves GFS/ECMWF/AIGFS identity,

@@ -4,9 +4,9 @@ This document indexes all signals, alpha models, gates, sizing formulas, and exi
 
 ---
 
-## 1. Unified Strategy: `weather_physics` (Candidate; not yet deployed)
+## 1. Unified Strategy: `weather_physics` (Production)
 
-*   **File Path**: [`forecast/strategy_engine.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/strategy_engine.py)
+*   **File Path**: [`forecast/strategy_engine.py`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/forecast/strategy_engine.py)
 *   **Plain-English Explanation**: The bot converts deterministic GFS and ECMWF forecasts plus explicit forecast-error sigma into contract probabilities, applies bounded daily-high/low physics before the CDF, uses actual NCEP AIGFS disagreement to scale uncertainty, optionally splices HRRR into near-term daily-HIGH pricing, checks safety gates, and calculates Kelly contract quantities.
 *   **Active Status**: **ACTIVE** (This is the only strategy that evaluates, submits, and exits live trades).
 

@@ -16,6 +16,78 @@ BASE_GFS_WEIGHT = 0.60
 BASE_ECMWF_WEIGHT = 0.40
 
 
+def get_production_policy_status(
+    *,
+    balance_usd: float = 0.0,
+    db_path: str = DB_PATH,
+    learning: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the versioned policy that actually governs a production entry."""
+    import config
+    from forecast.pricing_engine import PHYSICS_METHOD, PRODUCTION_MODEL_PATH
+    from runtime.build_info import get_build_info
+
+    build = get_build_info()
+    learning_status = learning or get_weather_learning_status(db_path=db_path)
+    gate = learning_status.get("learning_gate") or {}
+    return {
+        "version": str(build.get("app_version") or ""),
+        "build_sha": str(build.get("build_sha") or build.get("sha") or ""),
+        "short_sha": str(
+            build.get("build_short_sha") or build.get("short_sha") or ""
+        ),
+        "execution": {
+            "entry_route": "taker_only_ioc",
+            "resting_entry_orders_allowed": False,
+            "max_entry_slippage": float(config.KALSHI_MAX_ENTRY_SLIPPAGE),
+        },
+        "probability": {
+            "model_path": PRODUCTION_MODEL_PATH,
+            "physics_method": PHYSICS_METHOD,
+            "commercial_open_meteo_ensemble_enabled": False,
+            "aigfs_role": "uncertainty_scaler",
+            "hrrr_role": "optional_near_term_daily_high",
+            "metar_role": "near_term_cooling_entry_veto",
+        },
+        "rbi2": {
+            "status": str(learning_status.get("status") or "unknown"),
+            "champion_artifact_id": str(
+                learning_status.get("champion_artifact_id") or ""
+            ),
+            "adaptive_active": bool(learning_status.get("adaptive_active")),
+            "learning_epoch": str(gate.get("learning_epoch") or ""),
+            "observed_days": float(gate.get("observed_days") or 0.0),
+            "minimum_days": float(gate.get("minimum_days") or config.RBI_MIN_DAYS),
+            "independent_event_count": int(
+                gate.get("independent_event_count") or 0
+            ),
+            "required_independent_events": int(
+                gate.get("required_independent_events")
+                or config.RBI_MIN_NEW_CLEAN_TRADES
+            ),
+            "learning_gate_passed": bool(gate.get("passed")),
+            "promotion_mode": "human_approved",
+            "official_outcomes_only": True,
+        },
+        "risk": {
+            "max_deployed_pct": float(config.KALSHI_MAX_DEPLOYED_PCT),
+            "max_concurrent_positions": int(config.KALSHI_MAX_CONCURRENT_POSITIONS),
+            "max_qty_per_position": int(config.KALSHI_MAX_QTY_PER_POSITION),
+            "base_position_cap_usd": float(config.KALSHI_MAX_USD_PER_POSITION),
+            "max_risk_per_event_pct": float(config.KALSHI_MAX_RISK_PER_EVENT_PCT),
+            "kelly_cap": float(config.KALSHI_KELLY_CAP),
+            "hub_exposure_cap_usd": float(
+                config.get_kalshi_hub_exposure_cap(balance_usd)
+            ),
+            "hub_exposure_rule": (
+                f"max(${config.KALSHI_HUB_EXPOSURE_MIN_USD:g}, "
+                f"{config.KALSHI_HUB_EXPOSURE_PCT:.0%} of live balance)"
+            ),
+            "minimum_model_headroom_f": float(config.KALSHI_MIN_MODEL_HEADROOM_F),
+        },
+    }
+
+
 def _connect_db(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
@@ -940,6 +1012,11 @@ def get_live_kalshi_status(
         payload["recent_execution"] = get_recent_execution_summary(db_path=db_path)
     payload["yes_path_audit"] = get_yes_path_audit_summary(db_path=db_path)
     payload["weather_learning"] = get_weather_learning_status(db_path=db_path)
+    payload["production_policy"] = get_production_policy_status(
+        balance_usd=balance_usd,
+        db_path=db_path,
+        learning=payload["weather_learning"],
+    )
     return payload
 
 

@@ -56,7 +56,7 @@ These parameters gate entry signals based on order book and forecast characteris
 
 ## 4. Retired Hard-RBI Floor Surface
 
-*   **Source File**: [`config/hub_params.json`](file:///Users/joshmacbookair2020/projects/algo_trading_final/config/hub_params.json)
+*   **Source File**: [`config/hub_params.json`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/config/hub_params.json)
 The former `_resolve_hard_rbi_threshold()` helper and hub-specific probability floors were not called by production and were removed in v19.20. `config/hub_params.json` must not be credited as an active probability gate; regional exposure is controlled by the enforced hub-dollar cap.
 
 | Regional Hub | Hard RBI Override | Included Cities |
@@ -77,4 +77,4 @@ The former `_resolve_hard_rbi_threshold()` helper and hub-specific probability f
 
 *   **Active City Count**: 32 cities.
 *   **Official Timezone**: `America/New_York` (defined as `MARKET_TIMEZONE` in `config.py`).
-*   **Station Reference File**: [`data/kalshi_weather_monitor.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/data/kalshi_weather_monitor.py#L86-L120) containing lat/lon and ICAO mappings for NOAA METAR reporting.
+*   **Station Reference File**: [`data/kalshi_weather_monitor.py`](file:///Users/joshmacbookair2020/Projects/algo_trading_final/data/kalshi_weather_monitor.py#L86-L120) containing lat/lon and ICAO mappings for NOAA METAR reporting.

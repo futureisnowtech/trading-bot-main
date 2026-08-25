@@ -117,16 +117,25 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
     monkeypatch.setattr(ed, "run_reconciliation", lambda: None, raising=False)
     monkeypatch.setattr(ed, "sync_incidents_and_notify", lambda: None, raising=False)
     monkeypatch.setattr(ed, "maintain_runtime_storage", lambda: None, raising=False)
-    # main() imports this from runtime.live_account at call time, so patching it on
-    # `ed` does nothing. Left unpatched it opens a live Kalshi broker connection
-    # whenever a real .env is present, and the resulting exception is swallowed by
-    # the cycle's except-block -- the cycle silently never runs and this test fails
-    # on developer machines while passing in a bare checkout.
+    # Both dependencies are imported at call time. Isolate them explicitly so a
+    # test can never authenticate, sweep orders, or depend on a developer .env.
     monkeypatch.setattr(
         "runtime.live_account.resolve_live_bankroll",
         lambda *args, **kwargs: 250.0,
         raising=False,
     )
+
+    class _BrokerStub:
+        def connect(self):
+            return True
+
+        def is_connected(self):
+            return True
+
+        def cancel_all_resting_orders(self, **_kwargs):
+            return {"ok": True, "cleared": 0}
+
+    monkeypatch.setattr("execution.kalshi_broker.KalshiBroker", _BrokerStub)
     monkeypatch.setattr(
         "notifications.telegram_bot.start_bot_thread",
         lambda: order.append("telegram"),

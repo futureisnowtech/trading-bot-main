@@ -71,7 +71,7 @@ above does not contain this candidate. The candidate:
 The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
 evidence for this refactor. On 2026-08-25, this dirty v19.20.0 candidate passed:
 
-- complete repository suite: 421 passed;
+- complete repository suite: 422 passed;
 - clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
   contract audit, and strict repo-truth gate;
 - live Kalshi schema probe: structurally valid API with $58.73 balance;

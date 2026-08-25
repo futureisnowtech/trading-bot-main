@@ -1851,6 +1851,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                 if str(pos.get("local_symbol") or "").split("-")[0] == family
                             )),
                         ),
+                        risk_book_fingerprint=(
+                            execution_controller.position_book_fingerprint(
+                                open_positions
+                            )
+                        ),
                     )
                     execution_plan = execution_controller.plan_entry(trade_intent)
                     if execution_plan.status != "ready":

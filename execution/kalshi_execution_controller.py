@@ -27,6 +27,7 @@ class TradeIntent:
     buying_power_usd: float
     market_snapshot: Any | None = None
     max_capital_usd: float | None = None
+    risk_book_fingerprint: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -283,13 +284,38 @@ class KalshiExecutionController:
         if now < self._next_order_at:
             time.sleep(self._next_order_at - now)
 
-    def _submission_gate_block(self, plan: ExecutionPlan) -> dict | None:
+    @staticmethod
+    def position_book_fingerprint(positions: list[dict] | tuple[dict, ...]) -> tuple:
+        """Stable identity for every position input used by admission controls."""
+        from config import get_kalshi_position_snapshot_exposure_usd
+
+        rows = []
+        for position in positions or []:
+            ticker = str(
+                position.get("local_symbol") or position.get("ticker") or ""
+            )
+            side = str(position.get("side") or position.get("right") or "").upper()
+            qty = round(abs(float(position.get("qty") or 0.0)), 8)
+            exposure = round(
+                abs(float(get_kalshi_position_snapshot_exposure_usd(position))),
+                8,
+            )
+            if ticker and qty > 0.0:
+                rows.append((ticker, side, qty, exposure))
+        return tuple(sorted(rows))
+
+    def _submission_gate_block(
+        self,
+        plan: ExecutionPlan,
+        *,
+        check_snapshot: bool = True,
+    ) -> dict | None:
         """Recheck every mutable entry permission at a broker-write boundary."""
         # Lightweight mathematical test brokers intentionally omit the live
         # snapshot interface. Real Kalshi brokers always expose it.
         if not hasattr(self._broker, "position_snapshot_status"):
             return None
-        if not self._broker.has_fresh_position_snapshot():
+        if check_snapshot and not self._broker.has_fresh_position_snapshot():
             return {
                 "order_id": "ERR", "status": "position_snapshot_unavailable",
                 "qty": 0, "filled_qty": 0,
@@ -311,15 +337,16 @@ class KalshiExecutionController:
             }
 
         try:
-            from runtime.operator_truth import get_release_status
+            from runtime.release_gate import get_entry_submission_gate_status
 
-            release = get_release_status()
+            release = get_entry_submission_gate_status()
             if not bool(release.get("entries_allowed")):
                 return {
                     "order_id": "ERR", "status": "release_gate_blocked",
                     "qty": 0, "filled_qty": 0,
                     "execution_reason": str(
-                        release.get("current_release_verdict")
+                        release.get("reason")
+                        or release.get("current_release_verdict")
                         or "release_not_promoted"
                     ),
                 }
@@ -327,6 +354,99 @@ class KalshiExecutionController:
             return {
                 "order_id": "ERR", "status": "release_gate_unavailable",
                 "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
+            }
+        return None
+
+    def _refresh_submission_risk_state(self, plan: ExecutionPlan) -> dict | None:
+        """Refresh and compare the admitted broker book immediately before POST."""
+        if not hasattr(self._broker, "position_snapshot_status"):
+            return None
+        try:
+            # Balance is a network read and can stall. Read it before positions
+            # so the final successful operation timestamps the risk snapshot.
+            buying_power = float(self._broker.get_account_balance())
+            if not math.isfinite(buying_power) or buying_power < 0.0:
+                raise RuntimeError(f"invalid_buying_power:{buying_power}")
+            if buying_power + 1e-9 < float(plan.intent.bankroll):
+                return {
+                    "order_id": "ERR",
+                    "status": "buying_power_changed",
+                    "qty": 0,
+                    "filled_qty": 0,
+                    "execution_reason": (
+                        f"admitted_cash={float(plan.intent.bankroll):.4f} "
+                        f"> live_cash={buying_power:.4f}"
+                    ),
+                }
+            required = config.estimate_kalshi_order_cost_usd(
+                plan.executable_qty,
+                plan.limit_price,
+            )
+            if required > buying_power + 1e-9:
+                return {
+                    "order_id": "ERR",
+                    "status": "insufficient_buying_power",
+                    "qty": 0,
+                    "filled_qty": 0,
+                    "execution_reason": (
+                        f"final_fee_inclusive_cost={required:.4f} "
+                        f"> live_cash={buying_power:.4f}"
+                    ),
+                }
+            if not self._broker.sync_positions():
+                raise RuntimeError("position_sync_failed")
+            if not self._broker.has_fresh_position_snapshot():
+                raise RuntimeError(str(self._broker.position_snapshot_status()))
+            positions = list(self._broker.get_positions() or [])
+            expected = plan.intent.risk_book_fingerprint
+            actual = self.position_book_fingerprint(positions)
+            if expected is not None and actual != expected:
+                return {
+                    "order_id": "ERR",
+                    "status": "position_book_changed",
+                    "qty": 0,
+                    "filled_qty": 0,
+                    "execution_reason": f"admitted={expected} current={actual}",
+                }
+            if not self._broker.has_fresh_position_snapshot():
+                raise RuntimeError(str(self._broker.position_snapshot_status()))
+        except Exception as exc:
+            return {
+                "order_id": "ERR",
+                "status": "position_snapshot_unavailable",
+                "qty": 0,
+                "filled_qty": 0,
+                "execution_reason": str(exc),
+            }
+        return None
+
+    def _dynamic_release_gate_block(self) -> dict | None:
+        """Retain live provider/incident/lane blockers before final risk refresh."""
+        if not hasattr(self._broker, "position_snapshot_status"):
+            return None
+        try:
+            from runtime.operator_truth import get_release_status
+
+            release = get_release_status()
+            if not bool(release.get("entries_allowed")):
+                return {
+                    "order_id": "ERR",
+                    "status": "release_gate_blocked",
+                    "qty": 0,
+                    "filled_qty": 0,
+                    "execution_reason": str(
+                        release.get("blockers")
+                        or release.get("current_release_verdict")
+                        or "release_not_promoted"
+                    ),
+                }
+        except Exception as exc:
+            return {
+                "order_id": "ERR",
+                "status": "release_gate_unavailable",
+                "qty": 0,
+                "filled_qty": 0,
+                "execution_reason": str(exc),
             }
         return None
 
@@ -359,7 +479,7 @@ class KalshiExecutionController:
 
         self._respect_local_pacing()
 
-        gate_block = self._submission_gate_block(plan)
+        gate_block = self._submission_gate_block(plan, check_snapshot=False)
         if gate_block is not None:
             return gate_block
 
@@ -377,8 +497,21 @@ class KalshiExecutionController:
             }
         plan = refreshed_plan
 
-        # Quote refresh is a network boundary. Permissions may change while it
-        # is in flight, so a prior passing verdict cannot authorize the POST.
+        # This full live check can be slow because it recomputes provider, lane,
+        # incident, and balance truth. It therefore runs before the final broker
+        # refresh, not between snapshot validation and the order POST.
+        gate_block = self._dynamic_release_gate_block()
+        if gate_block is not None:
+            return gate_block
+
+        risk_block = self._refresh_submission_risk_state(plan)
+        if risk_block is not None:
+            return risk_block
+
+        # Quote and broker refreshes are network boundaries. Re-read every
+        # mutable permission and require the just-refreshed snapshot immediately
+        # before POST; the initial permission check intentionally omitted the
+        # snapshot because planning may itself exceed the snapshot TTL.
         gate_block = self._submission_gate_block(plan)
         if gate_block is not None:
             return gate_block

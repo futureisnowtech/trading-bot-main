@@ -10,7 +10,7 @@ NYC has no commercial Open-Meteo key. Production requests keyless deterministic 
 
 The important continuity is that both proven endpoints use the canonical `forecast.pricing_engine.calculate_pricing()` production branch. Later releases changed calibration, physics, execution, and risk details, so the entire July-to-present period must not be described as one unchanged algorithm.
 
-## What v19.20.2 runs in production
+## What v19.20.3 runs in production
 
 1. `data/kalshi_weather_monitor.py` fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS forecasts, then attaches METAR and HRRR data where available. There is no commercial ensemble/key branch and no ICON input.
 2. The top-level provider identity is always GFS. If GFS is absent, the bundle fails closed instead of copying ECMWF or AIGFS into the GFS slot. Partial real models remain missing rather than being converted into fake neutral probabilities.

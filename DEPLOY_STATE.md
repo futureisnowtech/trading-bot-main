@@ -10,9 +10,9 @@ Last verified directly against NYC: 2026-08-25
 | Runtime root | `/home/algo-runner/bot` |
 | Containers | `execution-engine`, `kalshi-cockpit` — both up when checked |
 | Images | `ghcr.io/futureisnowtech/trading-bot-main:latest` and dashboard companion |
-| Version | `19.20.2` |
+| Version | `19.20.3` |
 | SHA / branch | `master`; read the authoritative runtime stamp for the exact SHA |
-| Verified rollout | v19.20.2 live-integration repair; the protected rollout's exact SHA and time are authoritative only in the runtime stamps listed below |
+| Verified rollout | v19.20.3 live submission-boundary repair; the protected rollout's exact SHA and time are authoritative only in the runtime stamps listed below |
 | Open-Meteo commercial key | absent |
 | Weather provider actually available | keyless deterministic GFS + ECMWF + NCEP AIGFS disagreement; optional HRRR and METAR; no commercial ensemble and no ICON |
 | City firewall | 27 cities blocked; only CHI, DEN, LAX, OKC, SAT enabled |
@@ -27,7 +27,7 @@ The stamped files are authoritative for deployed code identity:
 The live database remains canonical for trades and recent runtime evidence:
 `/home/algo-runner/bot/logs/trades.db`.
 
-## Deployed v19.20.2 system truth
+## Deployed v19.20.3 system truth
 
 NYC received the v19.20 deterministic-physics repair on 2026-08-25. The exact
 deployed SHA is deliberately not duplicated as a supposedly self-updating value
@@ -75,15 +75,17 @@ and `origin/master` must agree. The deployed version family:
   risk admission, keeps covariance/controller sizing fee-inclusive, and
   post-validates discrete covariance quantities against the hard variance rail;
 - blocks fresh entries during deployment until the new SHA earns its own hosted
-  audit, and rechecks the release/firewall/snapshot gates after final quote
-  refresh immediately before any broker POST.
+  audit; after final quote and full dynamic release checks, it refreshes cash
+  and positions, requires the admitted book to remain identical, and rechecks
+  the exact-build release/firewall/snapshot gates immediately before any IOC
+  broker POST.
 
 ## Production proof status
 
 The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
-evidence for this refactor. On 2026-08-25, v19.20.2 passed:
+evidence for this refactor. On 2026-08-25, v19.20.3 passed:
 
-- complete repository suite: 471 passed;
+- complete repository suite: 484 passed;
 - clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
   contract audit, and strict repo-truth gate;
 - live Kalshi REST audit: $58.15 cash, $58.16 equity, one open broker

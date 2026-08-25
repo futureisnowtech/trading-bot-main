@@ -76,6 +76,54 @@ def load_release_audit_artifact() -> dict[str, Any]:
         return {}
 
 
+def get_entry_submission_gate_status() -> dict[str, Any]:
+    """Return the persisted exact-build release decision for an order POST.
+
+    The full operator release status deliberately re-collects broker, provider,
+    incident, and lane truth and can take longer than a position-snapshot TTL.
+    The controller still runs that full dynamic check before refreshing cash
+    and positions. The immediate POST boundary validates the signed-off artifact
+    and exact running build with this bounded local read; otherwise the act of
+    re-collecting operator truth can make the just-admitted risk book stale.
+    """
+    from runtime.build_info import get_build_info
+
+    artifact = load_release_audit_artifact()
+    build = get_build_info()
+    verdict = str(artifact.get("verdict") or VERDICT_BLOCKED)
+    mode = str(artifact.get("mode") or "").strip()
+    audited_sha = str(artifact.get("audited_sha") or "").strip()
+    build_sha = str(build.get("sha") or "").strip()
+    artifact_allows = bool(artifact.get("entries_allowed"))
+    sha_matches = bool(audited_sha and build_sha and audited_sha == build_sha)
+    allowed = bool(
+        artifact_allows
+        and verdict in PASSING_VERDICTS
+        and sha_matches
+        and mode != "deploy_pending"
+        and not bool(build.get("metadata_stale"))
+    )
+    if allowed:
+        reason = ""
+    elif not artifact:
+        reason = "release_audit_missing"
+    elif verdict not in PASSING_VERDICTS or not artifact_allows:
+        reason = str((artifact.get("blockers") or [verdict])[0] or verdict)
+    elif mode == "deploy_pending":
+        reason = "release_audit_pending_new_build"
+    elif not sha_matches:
+        reason = f"release_audit_sha_mismatch ({audited_sha or 'missing'} != {build_sha or 'missing'})"
+    else:
+        reason = "deploy_runtime_metadata_stale"
+    return {
+        "entries_allowed": allowed,
+        "current_release_verdict": verdict,
+        "reason": reason,
+        "audited_sha": audited_sha,
+        "build_sha": build_sha,
+    }
+
+
 def write_release_audit_artifact(
     payload: dict[str, Any],
     *,

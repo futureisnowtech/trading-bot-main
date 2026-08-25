@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-08-25 (v19.20.3 live submission-boundary repair)
+- Replaces the order controller's slow full operator-status call at the immediate POST boundary with an exact-build local artifact check, while retaining the full live provider/lane/incident/balance gate before final broker refresh.
+- After all potentially slow release and quote reads, refreshes cash and positions, requires nondecreased admitted bankroll, compares the exact position/exposure book used by covariance and hub admission, and rechecks snapshot/firewall/release locally immediately before IOC submission. Changed, stale, unavailable, nonfinite, or fee-insufficient state vetoes without placing an order.
+- Adds live-boundary regressions for the production-observed 62-second planning delay plus changed books, sync failures/exceptions, post-sync expiry, balance failures/nonfinite values/drops, fee-inclusive insufficiency, and a dynamic gate closing after quote refresh.
+
 ## 2026-08-25 (v19.20.2 live-integration repair)
 - Refreshes authoritative Kalshi positions and cash immediately before each economically qualified candidate reaches sequential concurrency, family, covariance, regional-hub, and capital admission. A failed or stale refresh vetoes; a failed, zero-fill, partial, or capacity-neutralizing swap can no longer fall through into a new entry; the controller still rechecks snapshot, firewall, and release authorization after its final quote refresh and before the IOC POST.
 - Keeps covariance-shrunk quantities and controller capital on the same fee-inclusive taker basis, preventing a one-contract candidate from being rejected because its cap omitted the exchange fee. The covariance backstop is fee-inclusive too.

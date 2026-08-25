@@ -841,6 +841,36 @@ def test_build_deploy_pending_artifact_blocks_new_build_despite_prior_pass():
     assert payload["details"]["prior_release"]["verdict"] == "READY_FOR_LIVE"
 
 
+def test_entry_submission_gate_requires_ready_exact_build(monkeypatch):
+    import runtime.release_gate as gate
+
+    artifact = {
+        "verdict": gate.VERDICT_READY_FOR_LIVE,
+        "entries_allowed": True,
+        "audited_sha": "sha-new",
+        "mode": "remote_hosted",
+        "blockers": [],
+    }
+    monkeypatch.setattr(gate, "load_release_audit_artifact", lambda: dict(artifact))
+    monkeypatch.setattr(
+        "runtime.build_info.get_build_info",
+        lambda: {"sha": "sha-new", "metadata_stale": False},
+    )
+
+    assert gate.get_entry_submission_gate_status()["entries_allowed"] is True
+
+    artifact["audited_sha"] = "sha-old"
+    mismatch = gate.get_entry_submission_gate_status()
+    assert mismatch["entries_allowed"] is False
+    assert "sha_mismatch" in mismatch["reason"]
+
+    artifact["audited_sha"] = "sha-new"
+    artifact["mode"] = "deploy_pending"
+    pending = gate.get_entry_submission_gate_status()
+    assert pending["entries_allowed"] is False
+    assert pending["reason"] == "release_audit_pending_new_build"
+
+
 def test_build_deploy_pending_artifact_keeps_existing_blocked_state():
     from runtime.release_gate import build_deploy_pending_artifact
 

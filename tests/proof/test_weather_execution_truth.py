@@ -567,7 +567,10 @@ def test_metar_cooling_derivative_reaches_post_peak_high_veto(monkeypatch):
             "sigma_high": 1.0,
             "peak_tcdc": 5.0,
             "timestamp": datetime.now(timezone.utc).timestamp(),
-            "intraday": {"metar_temp_trend_f_per_hr": -0.4},
+            "intraday": {
+                "metar_temp_trend_f_per_hr": -0.4,
+                "metar_temp_trend_age_seconds": 30.0,
+            },
         },
     )
     monkeypatch.setattr(

@@ -10,9 +10,9 @@ Last verified directly against NYC: 2026-08-25
 | Runtime root | `/home/algo-runner/bot` |
 | Containers | `execution-engine`, `kalshi-cockpit` — both up when checked |
 | Images | `ghcr.io/futureisnowtech/trading-bot-main:latest` and dashboard companion |
-| Version | `19.20.1` |
+| Version | `19.20.2` |
 | SHA / branch | `master`; read the authoritative runtime stamp for the exact SHA |
-| Verified rollout | Base v19.20 rollout `2cff745d361ec4944605db80b2e1fa32a923745e` at `2026-08-25T04:51:25Z`; later v19.20 observability-only follow-ups must replace this SHA in the runtime stamp |
+| Verified rollout | v19.20.2 live-integration repair; the protected rollout's exact SHA and time are authoritative only in the runtime stamps listed below |
 | Open-Meteo commercial key | absent |
 | Weather provider actually available | keyless deterministic GFS + ECMWF + NCEP AIGFS disagreement; optional HRRR and METAR; no commercial ensemble and no ICON |
 | City firewall | 27 cities blocked; only CHI, DEN, LAX, OKC, SAT enabled |
@@ -27,7 +27,7 @@ The stamped files are authoritative for deployed code identity:
 The live database remains canonical for trades and recent runtime evidence:
 `/home/algo-runner/bot/logs/trades.db`.
 
-## Deployed v19.20.1 system truth
+## Deployed v19.20.2 system truth
 
 NYC received the v19.20 deterministic-physics repair on 2026-08-25. The exact
 deployed SHA is deliberately not duplicated as a supposedly self-updating value
@@ -66,9 +66,14 @@ and `origin/master` must agree. The deployed version family:
   advancing;
 - replays the production divergence probability shrink during challenger
   scoring rather than validating only the pre-guard blend;
-- uses empirical covariance only after 90 raw NOAA days exist for every station;
+- uses empirical covariance only after 90 raw local-calendar archive days exist
+  for every station coordinate; a daily job maintains this keyless historical
+  input independently of the commercial ensemble API;
   before then, a gross comonotonic bound grants no YES/NO, cross-city, or
   disjoint-bracket netting;
+- refreshes the live broker book before every qualified candidate's sequential
+  risk admission, keeps covariance/controller sizing fee-inclusive, and
+  post-validates discrete covariance quantities against the hard variance rail;
 - blocks fresh entries during deployment until the new SHA earns its own hosted
   audit, and rechecks the release/firewall/snapshot gates after final quote
   refresh immediately before any broker POST.
@@ -76,12 +81,13 @@ and `origin/master` must agree. The deployed version family:
 ## Production proof status
 
 The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
-evidence for this refactor. On 2026-08-25, v19.20.1 passed:
+evidence for this refactor. On 2026-08-25, v19.20.2 passed:
 
-- complete repository suite: 446 passed;
+- complete repository suite: 471 passed;
 - clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
   contract audit, and strict repo-truth gate;
-- live Kalshi schema probe: structurally valid API with $58.73 balance;
+- live Kalshi REST audit: $58.15 cash, $58.16 equity, one open broker
+  position, 297 settled contracts, and independent P&L cross-check agreement;
 - keyless provider probe: one contract-projected value each for GFS, ECMWF, and
   AIGFS; explicit GFS/ECMWF sigma; bounded pre-CDF physics; weights sum to one;
   model path `deterministic_gfs_ecmwf_aigfs_hrrr_physics`;
@@ -93,8 +99,9 @@ evidence for this refactor. On 2026-08-25, v19.20.1 passed:
   live account;
 - protected GitHub CI and protected NYC deployment from the exact authored SHA;
 - an independent in-container hosted audit after deployment: `READY_FOR_LIVE`,
-  zero blockers, fresh deterministic weather, $58.73 broker/runtime balance
-  parity, healthy cockpit, one broker position, and new entries allowed.
+  zero blockers, fresh deterministic weather, broker/runtime balance parity,
+  healthy cockpit, and new entries allowed. Re-run this hosted audit after every
+  subsequent SHA; the runtime artifact, not this narrative, is authoritative.
 
 No live order was submitted by the proof commands. Current deployment identity
 must always be read from the stamped files listed above.

@@ -361,6 +361,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rbi_policy = policy.get("rbi2") or {}
     rbi_evidence = rbi_policy.get("evidence_health") or {}
     risk_policy = policy.get("risk") or {}
+    covariance_history = risk_policy.get("covariance_history") or {}
     balance = float(truth.get("balance_usd") or 0.0)
     active_markets = int(truth.get("active_markets") or 0)
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
@@ -408,6 +409,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{float(risk_policy.get('minimum_model_headroom_f') or 0.0):g}F headroom\n"
         f"Covariance Fallback: "
         f"{risk_policy.get('covariance_non_authoritative_mode') or 'unknown'}\n"
+        f"Covariance History: {int(covariance_history.get('covered_station_count') or 0)}/"
+        f"{int(covariance_history.get('requested_station_count') or 0)} stations; "
+        f"minimum {int(covariance_history.get('minimum_raw_days') or 0)}/"
+        f"{int(covariance_history.get('required_raw_days_per_station') or 0)} raw days; "
+        f"{'AUTHORITATIVE' if covariance_history.get('authoritative') else 'CONSERVATIVE FALLBACK'}\n"
         f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
         f"Infra Blockers: {len(release.get('top_infrastructure_blockers') or [])}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"

@@ -50,6 +50,7 @@ from config import (
     KALSHI_MAX_SPREAD_RATIO,
     KALSHI_MAX_USD_PER_POSITION,
     KALSHI_ULTRA_HIGH_PROB_THRESHOLD,
+    METAR_TREND_MAX_AGE_SEC,
     estimate_kalshi_fee_per_contract,
     estimate_kalshi_order_cost_usd,
     get_kalshi_effective_concurrent_cap,
@@ -1076,6 +1077,17 @@ def _strategy_weather_details(
     consensus_projection = pricing.get("consensus_projection")
     intraday = dict(w_data.get("intraday") or {})
     station_derivative = intraday.get("metar_temp_trend_f_per_hr")
+    station_derivative_age = intraday.get("metar_temp_trend_age_seconds")
+    try:
+        derivative_is_fresh = (
+            station_derivative is not None
+            and station_derivative_age is not None
+            and 0.0 <= float(station_derivative_age) <= METAR_TREND_MAX_AGE_SEC
+        )
+    except (TypeError, ValueError):
+        derivative_is_fresh = False
+    if not derivative_is_fresh:
+        station_derivative = None
     station_local_hour = 0.0
     if station_derivative is not None and mode == "HIGH":
         try:
@@ -1093,6 +1105,9 @@ def _strategy_weather_details(
         current_local_hour=station_local_hour,
     )
     pricing_trace["station_derivative_f_per_hr"] = derivative_f_per_hr if station_derivative is not None else None
+    pricing_trace["station_derivative_age_seconds"] = (
+        float(station_derivative_age) if derivative_is_fresh else None
+    )
     pricing_trace["peak_heating_concluded"] = peak_heating_concluded
     convergence = _convergence_guardrail(q_gfs, q_ecmwf)
     convergence_multiplier = float(convergence["convergence_multiplier"])

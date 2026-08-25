@@ -10,7 +10,7 @@ NYC has no commercial Open-Meteo key. Production requests keyless deterministic 
 
 The important continuity is that both proven endpoints use the canonical `forecast.pricing_engine.calculate_pricing()` production branch. Later releases changed calibration, physics, execution, and risk details, so the entire July-to-present period must not be described as one unchanged algorithm.
 
-## What v19.20.1 runs in production
+## What v19.20.2 runs in production
 
 1. `data/kalshi_weather_monitor.py` fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS forecasts, then attaches METAR and HRRR data where available. There is no commercial ensemble/key branch and no ICON input.
 2. The top-level provider identity is always GFS. If GFS is absent, the bundle fails closed instead of copying ECMWF or AIGFS into the GFS slot. Partial real models remain missing rather than being converted into fake neutral probabilities.
@@ -20,8 +20,9 @@ The important continuity is that both proven endpoints use the canonical `foreca
 6. Live-call isotonic refitting is retired. The governed raw blend is identity-clamped until a versioned, walk-forward-validated calibration artifact has its own promotion gate.
 7. The convergence guardrail awards 1.5x only for unanimous GFS/ECMWF same-tail agreement. Gaps above 20 points pull `q_hat` toward 50% and reduce size; gaps above 70 points veto the entry. RBI challenger scoring replays this same probability shrink after the production log-odds/HRRR blend.
 8. The strategy compares guarded probability with live YES/NO quotes, ceiled fees, spread, freshness, and exposure. Convergence, divergence, predictive sigma, AIGFS uncertainty, and same-event penalties all reach the taker-only IOC size solver.
-9. Fee-inclusive order cost is capped by the position rail and `KALSHI_KELLY_CAP`; aggregate family exposure is capped by `KALSHI_MAX_RISK_PER_EVENT_PCT`; covariance errors fail closed. Empirical covariance requires 90 raw NOAA days for every station. Until then, a gross comonotonic bound gives no YES/NO, cross-city, or disjoint-bracket netting credit.
-10. Every market that reaches canonical pricing records its YES-basis decision probability and the model/provider fields required for RBI replay even when a later guardrail vetoes the trade. Pre-pricing failures remain explicitly unscored. Bounded evidence-health telemetry and the Telegram sentinel report if valid current-epoch traces stop advancing.
+9. Fee-inclusive order cost is capped by the position rail and `KALSHI_KELLY_CAP`; aggregate family exposure is capped by `KALSHI_MAX_RISK_PER_EVENT_PCT`; covariance errors fail closed. Empirical covariance requires 90 raw local-calendar days for every station coordinate from the keyless Open-Meteo historical archive. This is not the commercial ensemble API and is not mislabeled as observed NOAA/ASOS truth. Until coverage is complete, a gross comonotonic bound gives no YES/NO, cross-city, or disjoint-bracket netting credit.
+10. Immediately before sequential admission, the runner refreshes broker positions and recomputes concurrency, family, covariance, hub, and capital state. Covariance-shrunk quantity is converted back to a fee-inclusive taker cost before the controller replans the final quote and rechecks all mutable gates.
+11. Every market that reaches canonical pricing records its YES-basis decision probability and the model/provider fields required for RBI replay even when a later guardrail vetoes the trade. Pre-pricing failures remain explicitly unscored. Bounded evidence-health telemetry and the Telegram sentinel report if valid current-epoch traces stop advancing.
 
 ## RBI 2.0 learning period
 

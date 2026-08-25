@@ -205,6 +205,7 @@ updates = {
     "RBI_LEARNING_EPOCH": "v19.20.0-deterministic-physics-path",
     "WEATHER_PROVIDER_COOLDOWN_SEC": "1200",
     "WEATHER_MODEL_PAUSE_SEC": "0.75",
+    "METAR_TREND_MAX_AGE_SEC": "5400",
     "CITY_BLACKLIST": "ABQ,ATL,AUS,BOS,CHS,CLT,DAL,DC,DET,HOU,LV,MCI,MCO,MIA,MKE,MSP,MSY,NY,OMA,PDX,PHL,PHX,RDU,SEA,SF,SLC,STL",
 }
 retired = {
@@ -480,6 +481,22 @@ echo "  Ensuring watchdog cron is installed..."
 WATCHDOG_CRON="*/15 * * * * PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/watchdog_host.sh >> ${PROJECT_DIR}/logs/watchdog_cron.log 2>&1"
 ( crontab -l 2>/dev/null | grep -v 'watchdog_host.sh' | grep -v 'scripts/watchdog.py' || true; echo "\${WATCHDOG_CRON}" ) | crontab -
 crontab -l | grep -F 'scripts/watchdog_host.sh'
+
+# Refresh the empirical station-history input daily.  The first production
+# backfill is run explicitly after deployment verification; this cron keeps the
+# raw local-day coverage current without coupling provider latency to trading.
+echo "  Ensuring station-history refresh cron is installed..."
+STATION_HISTORY_CRON="23 2 * * * docker exec execution-engine python3 /app/scripts/backfill_station_history.py --days-back 120 >> ${PROJECT_DIR}/logs/station_history_cron.log 2>&1"
+( crontab -l 2>/dev/null | grep -v 'backfill_station_history.py' || true; echo "\${STATION_HISTORY_CRON}" ) | crontab -
+crontab -l | grep -F 'backfill_station_history.py'
+
+echo "  Bootstrapping 120 local-calendar days of station-coordinate history..."
+if ! docker exec execution-engine \
+  python3 /app/scripts/backfill_station_history.py --days-back 120 \
+  </dev/null
+then
+  echo "  Station-history bootstrap incomplete; covariance remains on the conservative no-netting fallback and the daily cron will retry."
+fi
 
 # NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole
 # block is piped into a remote `bash -s`, so an interactive-attached container

@@ -49,6 +49,7 @@ jobs:
           KALSHI_MAX_ENTRY_SLIPPAGE=0.02
           KALSHI_POSITION_SNAPSHOT_MAX_AGE_SEC=60
           KALSHI_MIN_MODEL_HEADROOM_F=2.0
+          METAR_TREND_MAX_AGE_SEC=5400
           CITY_BLACKLIST=ABQ,ATL,AUS,BOS,CHS,CLT,DAL,DC,DET,HOU,LV,MCI,MCO,MIA,MKE,MSP,MSY,NY,OMA,PDX,PHL,PHX,RDU,SEA,SF,SLC,STL
           KALSHI_HIGH_PROB_THRESHOLD=0.80
           KALSHI_ULTRA_HIGH_PROB_THRESHOLD=0.90
@@ -73,13 +74,32 @@ jobs:
           : > kalshi_private_key.pem
           chmod 600 kalshi_private_key.pem
 
-      - name: Lint with ruff (non-blocking)
+      - name: Lint production trading boundaries (blocking)
+        run: |
+          ruff check \
+            config.py \
+            forecast/covariance_engine.py \
+            forecast/db.py \
+            forecast/runner.py \
+            forecast/strategy_engine.py \
+            data/kalshi_weather_monitor.py \
+            dashboard/jarvis_brain.py \
+            execution/kalshi_execution_controller.py \
+            runtime/operator_truth.py \
+            runtime/sentinel.py \
+            scripts/watchdog.py \
+            scripts/backfill_station_history.py \
+            notifications/telegram_bot.py \
+            --ignore=E501,E402,F401,F811 \
+            --select=E,F,W
+
+      - name: Report legacy repository lint debt (advisory)
+        continue-on-error: true
         run: |
           ruff check . \
             --exclude=".git,__pycache__,logs" \
-            --ignore=E501,E402,F401,F811,W503 \
-            --select=E,F,W \
-            || true
+            --ignore=E501,E402,F401,F811 \
+            --select=E,F,W
 
       - name: Boundary contract audit
         run: |

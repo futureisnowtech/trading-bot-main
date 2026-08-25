@@ -410,6 +410,9 @@ WEATHER_PROVIDER_COOLDOWN_SEC: int = int(
 WEATHER_MODEL_PAUSE_SEC: float = float(
     os.getenv("WEATHER_MODEL_PAUSE_SEC", "0.75")
 )
+METAR_TREND_MAX_AGE_SEC: int = int(
+    os.getenv("METAR_TREND_MAX_AGE_SEC", "5400")
+)
 
 # ════════════════════════════════════════════════════════════════════
 # TELEGRAM (Mobile HUD)

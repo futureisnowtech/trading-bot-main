@@ -47,6 +47,7 @@ _OBSERVED_HOURLY_CACHE: Dict[str, Dict[str, Any]] = {}
 WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
 WEATHER_PROVIDER_COOLDOWN_SEC = 1200
 WEATHER_MODEL_PAUSE_SEC = 0.75
+METAR_TREND_MAX_AGE_SEC = 5400
 try:
     from config import (
         DB_PATH as _DB_PATH,
@@ -55,6 +56,7 @@ try:
         WEATHER_ACTIVE_CITY_REFRESH_SEC as _CFG_ACTIVE_CITY_REFRESH_SEC,
         WEATHER_PROVIDER_COOLDOWN_SEC as _CFG_PROVIDER_COOLDOWN_SEC,
         WEATHER_MODEL_PAUSE_SEC as _CFG_MODEL_PAUSE_SEC,
+        METAR_TREND_MAX_AGE_SEC as _CFG_METAR_TREND_MAX_AGE_SEC,
         WEATHER_CACHE_ROOT as _WEATHER_CACHE_ROOT,
     )
 
@@ -63,6 +65,7 @@ try:
     # Cached state stays usable out to the widest gate (daily), because a daily
     # high legitimately trades on a 90-minute-old model record.
     WEATHER_STATE_TTL_SEC = max(300, int(float(_CFG_FRESHNESS_MINUTES_DAILY) * 60))
+    METAR_TREND_MAX_AGE_SEC = max(60, int(_CFG_METAR_TREND_MAX_AGE_SEC))
     # But the refresh cadence is set by the *tightest* gate (hourly), minus a
     # 5-minute margin for fetch time. Deriving it from the daily window instead
     # left hourly contracts stale for roughly two-thirds of every cycle, so the
@@ -1352,13 +1355,58 @@ def _station_local_day(city_key: str) -> str:
     return _station_settlement_date(tz_name).isoformat()
 
 
-def _parse_metar_observation_key(metar_raw: str) -> float | None:
+def _parse_metar_observation_key(
+    metar_raw: str,
+    *,
+    reference_ts: float | None = None,
+) -> float | None:
+    """Resolve a METAR DDHHMMZ group to its nearest real UTC timestamp.
+
+    Keeping the old six-digit token as an ordering key breaks across UTC month
+    boundaries (312300Z -> 010000Z).  A real timestamp also lets derivative
+    freshness follow the observation rather than the time we happened to fetch
+    it.
+    """
     match = re.search(r"\b(\d{6})Z\b", str(metar_raw or ""))
     if not match:
         return None
     try:
-        return float(match.group(1))
-    except Exception:
+        token = match.group(1)
+        day = int(token[:2])
+        hour = int(token[2:4])
+        minute = int(token[4:6])
+        reference = datetime.fromtimestamp(
+            float(reference_ts if reference_ts is not None else time.time()),
+            tz=timezone.utc,
+        )
+        month_index = (reference.year * 12) + reference.month - 1
+        candidates: list[datetime] = []
+        for offset in (-1, 0, 1):
+            candidate_index = month_index + offset
+            year, zero_based_month = divmod(candidate_index, 12)
+            try:
+                candidates.append(
+                    datetime(
+                        year,
+                        zero_based_month + 1,
+                        day,
+                        hour,
+                        minute,
+                        tzinfo=timezone.utc,
+                    )
+                )
+            except ValueError:
+                continue
+        if not candidates:
+            return None
+        nearest = min(
+            candidates,
+            key=lambda candidate: abs((candidate - reference).total_seconds()),
+        )
+        if abs((nearest - reference).total_seconds()) > 36 * 3600:
+            return None
+        return nearest.timestamp()
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -1562,6 +1610,9 @@ def _intraday_payload(
     daily_min = cur_temp
     daily_precip = None
     metar_temp_trend_f_per_hr = None
+    metar_temp_trend_observed_at = None
+    metar_temp_trend_age_seconds = None
+    now_ts = time.time()
 
     if watermarks is not None:
         today_str = _station_local_day(city_key)
@@ -1572,6 +1623,7 @@ def _intraday_payload(
         temp_obs_key = f"{city_key}|{today_str}|temp_obs_key"
         temp_value_key = f"{city_key}|{today_str}|temp_value"
         temp_trend_key = f"{city_key}|{today_str}|temp_trend_f_per_hr"
+        temp_trend_at_key = f"{city_key}|{today_str}|temp_trend_observed_at"
         if cur_temp is not None:
             watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
             watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
@@ -1579,24 +1631,48 @@ def _intraday_payload(
         daily_min = watermarks.get(min_key, cur_temp)
 
         metar_raw = str(metar.get("raw") or "")
-        obs_key = _parse_metar_observation_key(metar_raw)
+        obs_key = _parse_metar_observation_key(metar_raw, reference_ts=now_ts)
         if obs_key is not None and cur_temp is not None:
             previous_obs = watermarks.get(temp_obs_key)
             previous_temp = watermarks.get(temp_value_key)
+            # v19.20.1 persisted DDHHMM numeric tokens.  Never combine one of
+            # those with the epoch timestamp used now: that would manufacture a
+            # near-zero trend from an enormous elapsed interval.
+            if previous_obs is not None and float(previous_obs) < 1_000_000_000:
+                previous_obs = None
+                previous_temp = None
+                watermarks.pop(temp_trend_key, None)
+                watermarks.pop(temp_trend_at_key, None)
             if previous_obs is not None and previous_temp is not None and float(obs_key) > float(previous_obs):
-                current_day_hour = int(float(obs_key) // 10000) * 24.0 + (float(obs_key) % 10000) // 100 + (float(obs_key) % 100) / 60.0
-                previous_day_hour = int(float(previous_obs) // 10000) * 24.0 + (float(previous_obs) % 10000) // 100 + (float(previous_obs) % 100) / 60.0
-                elapsed_hours = current_day_hour - previous_day_hour
+                elapsed_hours = (float(obs_key) - float(previous_obs)) / 3600.0
                 if elapsed_hours > 0.0:
                     metar_temp_trend_f_per_hr = round(
                         (float(cur_temp) - float(previous_temp)) / elapsed_hours,
                         4,
                     )
                     watermarks[temp_trend_key] = metar_temp_trend_f_per_hr
+                    watermarks[temp_trend_at_key] = float(obs_key)
             watermarks[temp_obs_key] = float(obs_key)
             watermarks[temp_value_key] = float(cur_temp)
-        if metar_temp_trend_f_per_hr is None and watermarks.get(temp_trend_key) is not None:
+        trend_at = watermarks.get(temp_trend_at_key)
+        if trend_at is not None:
+            metar_temp_trend_observed_at = float(trend_at)
+            metar_temp_trend_age_seconds = max(
+                0.0,
+                now_ts - metar_temp_trend_observed_at,
+            )
+        if (
+            metar_temp_trend_f_per_hr is None
+            and watermarks.get(temp_trend_key) is not None
+            and metar_temp_trend_age_seconds is not None
+            and metar_temp_trend_age_seconds <= METAR_TREND_MAX_AGE_SEC
+        ):
             metar_temp_trend_f_per_hr = float(watermarks[temp_trend_key])
+        if (
+            metar_temp_trend_age_seconds is not None
+            and metar_temp_trend_age_seconds > METAR_TREND_MAX_AGE_SEC
+        ):
+            metar_temp_trend_f_per_hr = None
         hourly_precip = _parse_metar_hourly_precip_inches(metar_raw)
         last_obs_key = watermarks.get(precip_obs_key, -1.0)
         if (
@@ -1620,9 +1696,11 @@ def _intraday_payload(
         "daily_precip": daily_precip,
         "metar_raw": metar.get("raw"),
         "metar_temp_trend_f_per_hr": metar_temp_trend_f_per_hr,
+        "metar_temp_trend_observed_at": metar_temp_trend_observed_at,
+        "metar_temp_trend_age_seconds": metar_temp_trend_age_seconds,
         "hrrr_high": hrrr.get("hrrr_high"),
         "hrrr_trend": hrrr.get("hrrr_trend"),
-        "ts": time.time(),
+        "ts": now_ts,
     }
 
 async def fetch_deterministic_weather_models(city_key: str, lat: float, lon: float) -> Dict[str, Any]:

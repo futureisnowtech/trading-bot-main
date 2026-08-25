@@ -13,6 +13,7 @@ the underlying runner functions remain reusable for diagnostics and local loops.
 
 import logging
 import json
+import math
 import os
 import sys
 import threading
@@ -75,6 +76,64 @@ def _get_broker():
     from execution.kalshi_broker import get_kalshi_broker
 
     return get_kalshi_broker()
+
+
+def _refresh_entry_risk_book(broker) -> list[dict]:
+    """Return a newly synchronized authoritative broker book for admission.
+
+    Strategy scans can take longer than the broker snapshot TTL.  Every
+    economically qualified candidate therefore refreshes positions before any
+    sequential cap, covariance, or hub calculation.  Failure is a hard veto.
+    """
+    try:
+        synced = bool(broker.sync_positions())
+    except Exception as exc:
+        raise RuntimeError(f"position_sync_failed:{exc}") from exc
+    if not synced or not broker.has_fresh_position_snapshot():
+        status = (
+            broker.position_snapshot_status()
+            if hasattr(broker, "position_snapshot_status")
+            else "snapshot_status_unavailable"
+        )
+        raise RuntimeError(f"position_snapshot_unavailable:{status}")
+    return list(broker.get_positions() or [])
+
+
+def _refresh_entry_buying_power(broker) -> float:
+    """Read current cash at the same admission boundary as the live book."""
+    try:
+        balance = float(broker.get_account_balance())
+    except Exception as exc:
+        raise RuntimeError(f"buying_power_unavailable:{exc}") from exc
+    if not math.isfinite(balance) or balance < 0.0:
+        raise RuntimeError(f"buying_power_invalid:{balance}")
+    return balance
+
+
+def _set_fee_inclusive_risk_size(result, qty: int, price: float, bankroll: float) -> None:
+    """Keep controller capital and risk quantity on the same taker-cost basis."""
+    from config import estimate_kalshi_order_cost_usd
+
+    safe_qty = max(0, int(qty))
+    result.position_contracts = safe_qty
+    result.position_fraction = (
+        estimate_kalshi_order_cost_usd(safe_qty, price, maker=False)
+        / max(float(bankroll), 1e-9)
+    )
+
+
+def _swap_exit_freed_capacity(
+    open_positions: list[dict],
+    exited_ticker: str,
+    concurrent_cap: int,
+) -> tuple[bool, float]:
+    """Prove a swap fully removed its target and actually opened a slot."""
+    remaining_qty = sum(
+        float(position.get("qty") or 0.0)
+        for position in open_positions
+        if str(position.get("local_symbol") or "") == exited_ticker
+    )
+    return remaining_qty <= 0.0 and len(open_positions) < int(concurrent_cap), remaining_qty
 
 
 def _weather_directional_sign(ticker: str, side: str) -> float:
@@ -1342,7 +1401,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 # is_at_cap to rotate out the worst position, so short-circuiting
                 # would silently disable swapping.
                 open_count = len(open_positions)
-                is_at_cap = open_count >= KALSHI_MAX_CONCURRENT_POSITIONS
+                from config import get_kalshi_effective_concurrent_cap
+
+                effective_concurrent_cap = get_kalshi_effective_concurrent_cap(
+                    result.side,
+                    result.confidence,
+                )
+                is_at_cap = open_count >= effective_concurrent_cap
 
                 # Stateful Firewall Gate Check (SPEC §5.4)
                 try:
@@ -1432,6 +1497,53 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     )
                     continue
 
+                # A full weather scan can outlive the broker snapshot TTL.  Risk
+                # admission must use the book that exists now, not the book from
+                # the start of the cycle.  Recompute every sequential control
+                # from this same authoritative snapshot.
+                try:
+                    open_positions = _refresh_entry_risk_book(broker)
+                    bankroll = _refresh_entry_buying_power(broker)
+                    buying_power_usd = bankroll
+                except Exception as snapshot_exc:
+                    logger.error(
+                        "[ForecastRunner] Candidate %s blocked: %s",
+                        local_sym,
+                        snapshot_exc,
+                    )
+                    _record_weather_candidate(
+                        candidate=candidate,
+                        decision="risk_block",
+                        reason="position_snapshot_unavailable",
+                        tradeability_status="blocked",
+                    )
+                    _bump_funnel("position_snapshot_unavailable")
+                    _persist_recent_veto(
+                        contract,
+                        result,
+                        reason="position_snapshot_unavailable",
+                        details={"stage": "pre_risk_admission", "error": str(snapshot_exc)},
+                    )
+                    continue
+
+                open_count = len(open_positions)
+                is_at_cap = open_count >= KALSHI_MAX_CONCURRENT_POSITIONS
+                deployed_value = sum(
+                    get_kalshi_position_snapshot_exposure_usd(position)
+                    for position in open_positions
+                )
+                total_net_assets = bankroll + deployed_value
+                deployed_pct = min(1.0, deployed_value / max(total_net_assets, 1.0))
+                open_event_families_counts = defaultdict(int)
+                for position in open_positions:
+                    open_event_families_counts[
+                        str(position.get("local_symbol") or "").split("-")[0]
+                    ] += 1
+                cycle_event_families = defaultdict(
+                    int,
+                    dict(open_event_families_counts),
+                )
+
                 # v19.1.12: Concurrency & Swap Logic
                 if is_at_cap:
                     # Identify worst open position by EV
@@ -1490,34 +1602,98 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         worst_pos.get("right", "C"),
                         worst_pos.get("qty", 0),
                     )
-                    if flatten_res.get("status") == "executed":
-                        from forecast.db import mark_forecast_position_closed
-                        mark_forecast_position_closed(worst_sym, exit_type="swap_exit", db_path=db_path)
+                    swap_filled_qty = float(flatten_res.get("filled_qty") or 0.0)
+                    if flatten_res.get("status") == "executed" and swap_filled_qty > 0.0:
                         pnl = float(flatten_res.get("pnl_usd") or 0.0)
                         try:
-                            from forecast.firewall import record_round_trip, record_realized_pnl
-                            record_round_trip(worst_sym, db_path=db_path)
+                            open_positions = _refresh_entry_risk_book(broker)
+                            bankroll = _refresh_entry_buying_power(broker)
+                            buying_power_usd = bankroll
+                        except Exception as snapshot_exc:
+                            logger.error(
+                                "[ForecastRunner] Swap completed but refreshed risk book failed: %s",
+                                snapshot_exc,
+                            )
+                            _bump_funnel("position_snapshot_unavailable")
+                            continue
+                        open_count = len(open_positions)
+                        is_at_cap = open_count >= effective_concurrent_cap
+                        deployed_value = sum(
+                            get_kalshi_position_snapshot_exposure_usd(position)
+                            for position in open_positions
+                        )
+                        cycle_event_families = defaultdict(int)
+                        for position in open_positions:
+                            cycle_event_families[
+                                str(position.get("local_symbol") or "").split("-")[0]
+                            ] += 1
+                        swap_freed_capacity, remaining_worst_qty = (
+                            _swap_exit_freed_capacity(
+                                open_positions,
+                                worst_sym,
+                                effective_concurrent_cap,
+                            )
+                        )
+                        try:
+                            from forecast.firewall import record_realized_pnl
+
                             record_realized_pnl(
                                 pnl,
                                 ticker=worst_sym,
-                                event_id=f"exit:{flatten_res.get('order_id') or worst_sym}",
+                                event_id=(
+                                    f"exit:{flatten_res.get('order_id') or worst_sym}:"
+                                    f"{swap_filled_qty}"
+                                ),
                                 db_path=db_path,
                             )
                         except Exception as fw_err:
-                            logger.error(f"[Firewall] Failed to log swap exit: {fw_err}")
-                        worst_family = worst_sym.split("-")[0]
-                        cycle_event_families[worst_family] = max(
-                            0,
-                            cycle_event_families.get(worst_family, 0) - 1,
+                            logger.error(f"[Firewall] Failed to log swap realized PnL: {fw_err}")
+                        if remaining_worst_qty <= 0.0:
+                            from forecast.db import mark_forecast_position_closed
+                            from forecast.firewall import record_round_trip
+
+                            mark_forecast_position_closed(
+                                worst_sym,
+                                exit_type="swap_exit",
+                                db_path=db_path,
+                            )
+                            try:
+                                record_round_trip(worst_sym, db_path=db_path)
+                            except Exception as fw_err:
+                                logger.error(f"[Firewall] Failed to log swap round trip: {fw_err}")
+                        if not swap_freed_capacity:
+                            logger.warning(
+                                "[ForecastRunner] SWAP INCOMPLETE: %s still has qty=%s or book remains at cap (%s/%s); blocking %s",
+                                worst_sym,
+                                remaining_worst_qty,
+                                open_count,
+                                effective_concurrent_cap,
+                                local_sym,
+                            )
+                            _record_weather_candidate(
+                                candidate=candidate,
+                                decision="risk_block",
+                                reason="swap_exit_incomplete",
+                                tradeability_status="blocked",
+                            )
+                            _bump_funnel("swap_exit_incomplete")
+                            continue
+                        log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
+                    else:
+                        logger.error(
+                            "[ForecastRunner] SWAP FAILED for %s; candidate %s remains blocked at cap (status=%s)",
+                            worst_sym,
+                            local_sym,
+                            flatten_res.get("status"),
                         )
-                        # Positional exposure is now updated dynamically via covariance check
-                        pass
-                        open_positions = [
-                            p
-                            for p in open_positions
-                            if p.get("local_symbol") != worst_sym
-                        ]
-                    log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="risk_block",
+                            reason="swap_exit_not_executed",
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel("swap_exit_not_executed")
+                        continue
 
                 # Hard duplicate guard: no same-contract double-down
                 key = f"{contract.get('local_symbol')}_{contract.get('right')}"
@@ -1603,8 +1779,12 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
                     if final_qty < candidate_qty:
                         logger.info(f"[ForecastRunner] Candidate {local_sym} qty shrunk from {candidate_qty} to {final_qty} by variance budget/absolute backstop")
-                        result.position_contracts = final_qty
-                        result.position_fraction = (final_qty * candidate_price) / bankroll
+                    _set_fee_inclusive_risk_size(
+                        result,
+                        final_qty,
+                        candidate_price,
+                        bankroll,
+                    )
                 except Exception as cov_err:
                     logger.error(f"[ForecastRunner] Variance budget check failed for {local_sym}: {cov_err}")
                     _record_weather_candidate(
@@ -2502,7 +2682,7 @@ def _send_daily_token_burn_report():
 def _cache_forecast_state():
     """v19.1.6: Caches rich broker-first forecast state for the HUD dashboard."""
     try:
-        logger.info("[ForecastRunner] Starting forecast state cache cycle (v19.1.6)...")
+        logger.info("[ForecastRunner] Starting forecast state cache cycle...")
         from logging_db.trade_logger import _conn
 
         broker = _get_broker()

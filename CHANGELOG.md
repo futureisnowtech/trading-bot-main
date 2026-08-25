@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-08-25 (v19.20.2 live-integration repair)
+- Refreshes authoritative Kalshi positions and cash immediately before each economically qualified candidate reaches sequential concurrency, family, covariance, regional-hub, and capital admission. A failed or stale refresh vetoes; a failed, zero-fill, partial, or capacity-neutralizing swap can no longer fall through into a new entry; the controller still rechecks snapshot, firewall, and release authorization after its final quote refresh and before the IOC POST.
+- Keeps covariance-shrunk quantities and controller capital on the same fee-inclusive taker basis, preventing a one-contract candidate from being rejected because its cap omitted the exchange fee. The covariance backstop is fee-inclusive too.
+- Makes covariance integer sizing safe at both edges: a fractional soft charge cannot erase the sole hard-admitted contract, a soft factor above one cannot enlarge quantity, and every final integer quantity is numerically revalidated against the hard variance budget.
+- Expires METAR temperature derivatives after 90 minutes and makes the strategy independently reject a derivative without a fresh age, preventing old cooling observations from vetoing later daily-HIGH entries.
+- Replaces lexical traceback counting with timestamp-associated watchdog parsing; starts Sentinel's no-entry clock only after continuous entry authorization; emits recovery notices; and removes retired state keys.
+- Adds a daily, local-time station-coordinate history refresh from the keyless Open-Meteo archive (not the commercial ensemble API), exposes raw coverage to Jarvis/Telegram, and retains the gross-comonotonic no-netting fallback until every registered station has 90 real stored days.
+- Makes Ruff blocking across the production trading boundary in CI and protected deploy while keeping unrelated legacy repository lint debt explicitly advisory. Adds live-boundary regressions for broker refresh, fee-cap parity, covariance discrete safety, METAR expiry, alert recovery, and timestamp parsing.
+
 ## 2026-08-25 (v19.20.1 production hardening)
 - Preserved canonical YES-basis probability and the RBI-required model/provider fields for every weather market that reached production pricing, even when a downstream economics, divergence, price, contract-type, headroom, or risk guard vetoed entry; pre-pricing failures remain explicitly unscored. RBI telemetry now reports bounded recent evidence health, Jarvis/Telegram share it, and the daemon sentinel alerts when complete current-epoch traces stop advancing.
 - Made RBI challenger scoring replay the same GFS/ECMWF divergence confidence shrink used by the production decision after the log-odds/HRRR blend. The mandatory seven-day, 24-independent-event, chronological-holdout, and human-promotion gates remain unchanged.

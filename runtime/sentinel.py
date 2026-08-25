@@ -85,7 +85,11 @@ def _check_entries_allowed() -> tuple[str, bool, str]:
     return "entries_allowed", not allowed, f"Fresh entries are BLOCKED. Blocker: {blocker}."
 
 
-def _check_entry_stall(stall_hours: float = 3.0) -> tuple[str, bool, str]:
+def _check_entry_stall(
+    stall_hours: float = 3.0,
+    *,
+    allowed_since_ts: float | None = None,
+) -> tuple[str, bool, str]:
     """No successful BUY in stall_hours. Only meaningful while entries are allowed --
     a blocked gate already has its own alert, and a stall while blocked is expected."""
     from config import DB_PATH, TRADE_DATA_START_DATE
@@ -102,17 +106,18 @@ def _check_entry_stall(stall_hours: float = 3.0) -> tuple[str, bool, str]:
     ).fetchone()
     conn.close()
     last_ts = row[0] if row else None
-    if not last_ts:
-        return "entry_stall", False, ""
+    now = datetime.now(timezone.utc)
+    start_ts = float(allowed_since_ts or now.timestamp())
+    if last_ts:
+        try:
+            last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            start_ts = max(start_ts, last_dt.timestamp())
+        except Exception:
+            pass
 
-    try:
-        last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
-        if last_dt.tzinfo is None:
-            last_dt = last_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return "entry_stall", False, ""
-
-    hours = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600.0
+    hours = max(0.0, now.timestamp() - start_ts) / 3600.0
     is_bad = hours > stall_hours
     return (
         "entry_stall",
@@ -175,19 +180,60 @@ def check_and_alert() -> list[str]:
     Returns the messages actually sent, mainly so callers/tests can assert on it.
     """
     state = _load_state()
+    key_by_check = {
+        "_check_entries_allowed": "entries_allowed",
+        "_check_entry_stall": "entry_stall",
+        "_check_rbi_evidence": "rbi_evidence",
+        "_check_pending_approvals": "pending_approvals",
+    }
+    known_state_keys = set(key_by_check.values())
+    state = {
+        key: value
+        for key, value in state.items()
+        if key in known_state_keys and isinstance(value, dict)
+    }
     sent: list[str] = []
+    now_ts = datetime.now(timezone.utc).timestamp()
 
     for check in _CHECKS:
         try:
-            key, is_bad, message = check()
+            if check is _check_entry_stall:
+                allowed_since = float(
+                    (state.get("entries_allowed") or {}).get("good_since_ts")
+                    or now_ts
+                )
+                key, is_bad, message = check(allowed_since_ts=allowed_since)
+            else:
+                key, is_bad, message = check()
         except Exception as exc:
             logger.warning("Sentinel check %s failed: %s", getattr(check, "__name__", check), exc)
             continue
+
+        previous_bad = bool((state.get(key) or {}).get("bad"))
+        if key == "entries_allowed":
+            entry = state.setdefault(key, {})
+            if is_bad:
+                entry.pop("good_since_ts", None)
+            elif previous_bad or not entry.get("good_since_ts"):
+                entry["good_since_ts"] = now_ts
 
         if _should_alert(state, key, is_bad) and message:
             if _send(message):
                 sent.append(message)
                 _mark(state, key, is_bad, sent=True)
+                continue
+        suppress_recovery = (
+            key == "entry_stall"
+            and bool((state.get("entries_allowed") or {}).get("bad"))
+        )
+        if previous_bad and not is_bad and not suppress_recovery:
+            recovery = f"Recovered: {key.replace('_', ' ')} is healthy again."
+            if _send(recovery):
+                sent.append(recovery)
+            else:
+                # Keep the transition pending so a transient Telegram failure
+                # cannot silently discard the only recovery notice.
+                _mark(state, key, True, sent=False)
                 continue
         _mark(state, key, is_bad, sent=False)
 

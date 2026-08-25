@@ -27,6 +27,7 @@ def get_production_policy_status(
     from forecast.covariance_engine import (
         AUTHORITATIVE_COVARIANCE_MODE,
         NON_AUTHORITATIVE_COVARIANCE_MODE,
+        get_station_history_status,
     )
     from forecast.pricing_engine import PHYSICS_METHOD, PRODUCTION_MODEL_PATH
     from intelligence.health import get_rbi_evidence_health
@@ -96,6 +97,7 @@ def get_production_policy_status(
             "covariance_authoritative_mode": AUTHORITATIVE_COVARIANCE_MODE,
             "covariance_non_authoritative_mode": NON_AUTHORITATIVE_COVARIANCE_MODE,
             "covariance_errors_fail_closed": True,
+            "covariance_history": get_station_history_status(db_path),
         },
     }
 

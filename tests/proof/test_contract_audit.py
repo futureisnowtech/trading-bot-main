@@ -108,6 +108,34 @@ def test_watchdog_enforces_taker_only_resting_order_invariant():
     assert "MAKER_ENTRY_ENABLED" not in src
 
 
+def test_watchdog_does_not_count_old_undated_traceback_as_recent(tmp_path, monkeypatch):
+    import importlib.util
+    from datetime import datetime, timezone
+
+    spec = importlib.util.spec_from_file_location(
+        "wd_timestamp", str(ROOT / "scripts" / "watchdog.py")
+    )
+    wd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wd)
+
+    cutoff = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
+    lines = [
+        "2026-08-24 01:00:00,000 worker ERROR old failure\n",
+        "Traceback (most recent call last):\n",
+        "  File 'old.py', line 1\n",
+        "2026-08-25 12:01:00,000 worker INFO recovered\n",
+    ]
+    assert wd._count_recent_error_records(lines, cutoff) == 0
+
+    lines.extend(
+        [
+            "2026-08-25 12:02:00,000 worker ERROR new failure\n",
+            "Traceback (most recent call last):\n",
+        ]
+    )
+    assert wd._count_recent_error_records(lines, cutoff) == 1
+
+
 def test_watchdog_detects_a_closed_release_gate(tmp_path, monkeypatch):
     """The silent halt that actually happened, and that "no entries" missed.
 

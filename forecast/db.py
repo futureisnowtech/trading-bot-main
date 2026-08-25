@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS noaa_daily_summaries (
     temp_max       REAL,
     temp_min       REAL,
     precipitation  REAL,
+    source         TEXT NOT NULL DEFAULT 'legacy_unknown',
     UNIQUE(station, date)
 );
 """
@@ -266,6 +267,12 @@ def init_forecast_db(db_path: str | None = None) -> None:
         _ensure_column(c, "forecast_resolutions", "lambda_scaler", "lambda_scaler REAL")
         _ensure_column(c, "forecast_resolutions", "fee_rate_applied", "fee_rate_applied REAL")
         _ensure_column(c, "forecast_resolutions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
+        _ensure_column(
+            c,
+            "noaa_daily_summaries",
+            "source",
+            "source TEXT NOT NULL DEFAULT 'legacy_unknown'",
+        )
         c.commit()
     from intelligence.schema import init_intelligence_db
     init_intelligence_db(db_path or DB_PATH)

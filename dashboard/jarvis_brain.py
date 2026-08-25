@@ -303,12 +303,19 @@ def get_trade_post_mortem(ticker_or_id: str) -> str:
             res.append(f"  - Settlement Result: Side '{resolution['resolved_side']}' | Observed Value: {resolution['resolved_value']}")
 
         if noaa_data:
-            res.append(f"\n🌡️ **NOAA Ground-Truth Station Observation ({station_code} on {date_str}):**")
+            history_source = str(noaa_data["source"] or "legacy_unknown")
+            if history_source == "open_meteo_archive_grid_at_settlement_station_coordinates":
+                history_label = "Open-Meteo Gridded Archive at Settlement-Station Coordinates"
+            elif history_source.startswith("noaa"):
+                history_label = "NOAA Station Observation"
+            else:
+                history_label = f"Legacy Weather History ({history_source})"
+            res.append(f"\n🌡️ **{history_label} ({station_code} on {date_str}):**")
             res.append(f"  - Max Temperature: {noaa_data['temp_max']}°F")
             res.append(f"  - Min Temperature: {noaa_data['temp_min']}°F")
             res.append(f"  - Precipitation: {noaa_data['precipitation']} in")
         elif station_code or date_str:
-            res.append(f"\n🌡️ **NOAA Observation Query:** Station {station_code}, Date {date_str} (No direct record matched in noaa_daily_summaries).")
+            res.append(f"\n🌡️ **Weather History Query:** Station {station_code}, Date {date_str} (No direct record matched in the legacy-named noaa_daily_summaries table).")
 
         return "\n".join(res)
     except Exception as e:

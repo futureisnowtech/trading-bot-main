@@ -25,6 +25,44 @@ class CovarianceDataUnavailable(RuntimeError):
     """Raised when portfolio risk cannot be evaluated from real pricing inputs."""
 
 
+def get_station_history_status(
+    db_path: str | None,
+    stations: List[str] | None = None,
+) -> Dict[str, Any]:
+    """Return raw station coverage without imputing authority."""
+    requested = list(stations or [loc["icao"] for loc in STATIONS.values()])
+    counts = {station: 0 for station in requested}
+    if db_path and os.path.exists(db_path):
+        try:
+            placeholders = ",".join("?" for _ in requested)
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT station, COUNT(DISTINCT date)
+                    FROM noaa_daily_summaries
+                    WHERE temp_max IS NOT NULL AND station IN ({placeholders})
+                    GROUP BY station
+                    """,
+                    requested,
+                ).fetchall()
+            for station, count in rows:
+                counts[str(station)] = int(count or 0)
+        except sqlite3.Error:
+            pass
+    minimum = min(counts.values()) if counts else 0
+    return {
+        "source": "open_meteo_archive_grid_at_settlement_station_coordinates",
+        "required_raw_days_per_station": MIN_AUTHORITATIVE_STATION_DAYS,
+        "requested_station_count": len(requested),
+        "covered_station_count": sum(value > 0 for value in counts.values()),
+        "minimum_raw_days": minimum,
+        "authoritative": bool(requested) and all(
+            value >= MIN_AUTHORITATIVE_STATION_DAYS for value in counts.values()
+        ),
+        "station_raw_days": counts,
+    }
+
+
 def _hours_to_resolution(value: str) -> float:
     if not value:
         return 0.0
@@ -463,7 +501,10 @@ def check_and_shrink_candidate(
     from forecast.db import get_contract_metadata
     from data.kalshi_weather_monitor import get_weather_data
     from forecast.pricing_engine import calculate_pricing
-    from config import get_kalshi_position_snapshot_exposure_usd
+    from config import (
+        get_kalshi_position_snapshot_exposure_usd,
+        max_kalshi_contracts_for_budget,
+    )
 
     # 1. Enrich open positions with metadata
     open_contracts = []
@@ -563,6 +604,10 @@ def check_and_shrink_candidate(
     if N_open > 0:
         Sigma_open = Sigma_full[:N_open, :N_open]
         var_current = calculate_portfolio_variance(w_open, Sigma_open)
+        if not math.isfinite(var_current) or var_current < -1e-9:
+            raise CovarianceDataUnavailable(
+                f"invalid_current_portfolio_variance:{var_current}"
+            )
         if var_current > var_limit:
             return 0, 1.0, {
                 "reason": "portfolio_already_over_budget",
@@ -587,11 +632,21 @@ def check_and_shrink_candidate(
     # 8. Absolute backstop limit
     # sum(|w_i| * fill_price_i) <= 0.90 * B
     current_cost = sum(
-        get_kalshi_position_snapshot_exposure_usd(open_contracts[i])
+        get_kalshi_position_snapshot_exposure_usd(
+            open_contracts[i],
+            include_estimated_fee=True,
+        )
         for i in range(N_open)
     )
     max_cost_allowed = max(0.0, 0.90 * bankroll - current_cost)
-    max_qty_by_backstop = int(math.floor(max_cost_allowed / max(1e-9, candidate_price)))
+    # The absolute capital rail is fee-inclusive.  A raw price division can
+    # admit one more taker contract than the account can actually fund because
+    # Kalshi rounds transaction fees up to the cent.
+    max_qty_by_backstop = max_kalshi_contracts_for_budget(
+        candidate_price,
+        max_cost_allowed,
+        maker=False,
+    )
 
     allowed_qty = min(max_qty_by_variance, max_qty_by_backstop)
     if allowed_qty <= 0:
@@ -604,22 +659,88 @@ def check_and_shrink_candidate(
         }
 
     # 9. Marginal Risk Charge
-    charge_factor = calculate_marginal_risk_charge(
+    raw_charge_factor = calculate_marginal_risk_charge(
         w_open,
         Sigma_full,
         candidate_idx,
         candidate_risk_sign,
         bankroll
     )
+    try:
+        raw_charge_factor = float(raw_charge_factor)
+    except (TypeError, ValueError) as exc:
+        raise CovarianceDataUnavailable(
+            f"invalid_marginal_risk_charge:{raw_charge_factor}"
+        ) from exc
+    if not math.isfinite(raw_charge_factor):
+        raise CovarianceDataUnavailable(
+            f"invalid_marginal_risk_charge:{raw_charge_factor}"
+        )
+    # The marginal charge is a soft shrink only.  It may never enlarge the
+    # quantity already admitted by the hard quadratic root, and a fractional
+    # penalty may not erase the sole contract that the hard risk rails allowed.
+    charge_factor = max(0.0, min(1.0, raw_charge_factor))
     final_qty = int(math.floor(allowed_qty * charge_factor))
+    if allowed_qty == 1 and charge_factor > 0.0:
+        final_qty = 1
+
+    if final_qty <= 0:
+        return 0, charge_factor, {
+            "reason": "marginal_risk_charge_veto",
+            "qty": 0,
+            "charge_factor": charge_factor,
+            "raw_charge_factor": raw_charge_factor,
+            "max_by_variance": max_qty_by_variance,
+            "max_by_backstop": max_qty_by_backstop,
+            "var_current": var_current,
+            "projected_variance": var_current,
+            "limit": var_limit,
+            **covariance_debug,
+        }
+
+    # Numerically prove the discrete integer we return still satisfies the hard
+    # variance budget.  This catches rounding/root drift and makes the final
+    # admission fail closed even if the analytical sizing code changes later.
+    projected_variance = var_current
+    while final_qty > 0:
+        projected_weights = np.concatenate(
+            [w_open, np.array([candidate_risk_sign * final_qty], dtype=float)]
+        )
+        projected_variance = calculate_portfolio_variance(
+            projected_weights,
+            Sigma_full,
+        )
+        if (
+            math.isfinite(projected_variance)
+            and projected_variance >= -1e-9
+            and projected_variance <= var_limit + 1e-9
+        ):
+            break
+        final_qty -= 1
+
+    if final_qty <= 0:
+        return 0, charge_factor, {
+            "reason": "post_validation_variance_veto",
+            "qty": 0,
+            "charge_factor": charge_factor,
+            "raw_charge_factor": raw_charge_factor,
+            "max_by_variance": max_qty_by_variance,
+            "max_by_backstop": max_qty_by_backstop,
+            "var_current": var_current,
+            "projected_variance": projected_variance,
+            "limit": var_limit,
+            **covariance_debug,
+        }
 
     return final_qty, charge_factor, {
         "reason": "approved",
         "qty": final_qty,
         "charge_factor": charge_factor,
+        "raw_charge_factor": raw_charge_factor,
         "max_by_variance": max_qty_by_variance,
         "max_by_backstop": max_qty_by_backstop,
         "var_current": var_current,
+        "projected_variance": projected_variance,
         "limit": var_limit,
         **covariance_debug,
     }

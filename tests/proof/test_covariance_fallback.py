@@ -13,6 +13,7 @@ from forecast.covariance_engine import (
     NON_AUTHORITATIVE_COVARIANCE_MODE,
     assemble_covariance_matrix,
     check_and_shrink_candidate,
+    get_station_history_status,
     get_station_correlation_matrix,
 )
 
@@ -84,6 +85,18 @@ def test_each_station_with_90_raw_days_is_authoritative(tmp_path):
 
     assert authoritative is True
     assert matrix[("KAAA", "KAAA")] == pytest.approx(1.0)
+
+
+def test_station_history_status_reports_raw_coverage_without_imputation(tmp_path):
+    db_path = tmp_path / "coverage.db"
+    _write_station_history(db_path, {"KAAA": 90, "KBBB": 1})
+
+    status = get_station_history_status(str(db_path), ["KAAA", "KBBB"])
+
+    assert status["covered_station_count"] == 2
+    assert status["minimum_raw_days"] == 1
+    assert status["required_raw_days_per_station"] == 90
+    assert status["authoritative"] is False
 
 
 def test_non_authoritative_matrix_is_gross_comonotonic_even_for_disjoint_brackets():
@@ -271,3 +284,204 @@ def test_authoritative_copula_exception_fails_closed():
                 {("KNYC", "KDEN"): 0.30},
                 is_authoritative=True,
             )
+
+
+def test_soft_marginal_charge_cannot_erase_single_hard_admitted_contract():
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, False)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.50}),
+        patch("forecast.covariance_engine.calculate_shrinkage_limit", return_value=1.1),
+        patch("forecast.covariance_engine.calculate_marginal_risk_charge", return_value=0.9955),
+    ):
+        qty, charge, debug = check_and_shrink_candidate(
+            candidate_contract=candidate,
+            candidate_side="YES",
+            candidate_price=0.77,
+            candidate_qty=1,
+            open_positions=[],
+            bankroll=58.15,
+        )
+
+    assert qty == 1
+    assert charge == pytest.approx(0.9955)
+    assert debug["reason"] == "approved"
+
+
+def test_authoritative_soft_charge_never_enlarges_or_breaks_hard_variance_root():
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    open_position = {
+        **_contract(
+            "KXHIGHNY-99AUG25-T75",
+            "Will the high temperature in New York be 75F or above?",
+            75.0,
+        ),
+        "qty": 10,
+        "side": "YES",
+        "entry_price": 0.50,
+        "market_exposure_usd": 5.0,
+    }
+    sigma = np.array([[0.25, -0.125], [-0.125, 0.25]], dtype=float)
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, True)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.50}),
+        patch("forecast.covariance_engine.assemble_covariance_matrix", return_value=sigma),
+    ):
+        qty, charge, debug = check_and_shrink_candidate(
+            candidate_contract=candidate,
+            candidate_side="YES",
+            candidate_price=0.50,
+            candidate_qty=15,
+            open_positions=[open_position],
+            bankroll=62.75,
+        )
+
+    assert debug["raw_charge_factor"] > 1.0
+    assert charge == 1.0
+    assert qty == 10
+    assert debug["projected_variance"] <= debug["limit"] + 1e-9
+
+
+def test_absolute_backstop_counts_existing_position_fee_before_candidate():
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    open_position = {
+        **_contract(
+            "KXHIGHNY-99AUG25-T75",
+            "Will the high temperature in New York be 75F or above?",
+            75.0,
+        ),
+        "qty": 1,
+        "side": "YES",
+        "entry_price": 0.90,
+        "market_exposure_usd": 0.90,
+    }
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, False)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.001}),
+    ):
+        qty, _charge, debug = check_and_shrink_candidate(
+            candidate_contract=candidate,
+            candidate_side="YES",
+            candidate_price=0.89,
+            candidate_qty=1,
+            open_positions=[open_position],
+            bankroll=2.0,
+        )
+
+    # Raw position exposure leaves $0.90 under the 90% rail and would admit
+    # this $0.89 + $0.01-fee order.  Counting the existing position's estimated
+    # fee leaves only $0.89, so the new fee-inclusive order is correctly vetoed.
+    assert qty == 0
+    assert debug["reason"] == "shrunk_to_zero"
+    assert debug["max_by_backstop"] == 0
+
+
+@pytest.mark.parametrize("raw_charge", [float("nan"), float("inf"), "bad"])
+def test_invalid_marginal_risk_charge_fails_closed(raw_charge):
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, False)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.50}),
+        patch("forecast.covariance_engine.calculate_marginal_risk_charge", return_value=raw_charge),
+    ):
+        with pytest.raises(CovarianceDataUnavailable, match="invalid_marginal_risk_charge"):
+            check_and_shrink_candidate(
+                candidate_contract=candidate,
+                candidate_side="YES",
+                candidate_price=0.50,
+                candidate_qty=1,
+                open_positions=[],
+                bankroll=58.15,
+            )
+
+
+def test_zero_soft_charge_has_truthful_veto_reason():
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, False)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.50}),
+        patch("forecast.covariance_engine.calculate_marginal_risk_charge", return_value=0.0),
+    ):
+        qty, charge, debug = check_and_shrink_candidate(
+            candidate_contract=candidate,
+            candidate_side="NO",
+            candidate_price=0.50,
+            candidate_qty=1,
+            open_positions=[],
+            bankroll=58.15,
+        )
+
+    assert qty == 0
+    assert charge == 0.0
+    assert debug["reason"] == "marginal_risk_charge_veto"
+
+
+@pytest.mark.parametrize(
+    ("candidate_variance", "expected_qty", "expected_reason"),
+    [(0.25, 1, "approved"), (1.0, 0, "post_validation_variance_veto")],
+)
+def test_discrete_post_validation_shrinks_or_vetoes_false_analytical_capacity(
+    candidate_variance,
+    expected_qty,
+    expected_reason,
+):
+    candidate = _contract(
+        "KXHIGHDEN-99AUG25-T80",
+        "Will the high temperature in Denver be 80F or above?",
+        80.0,
+    )
+    with (
+        patch("forecast.covariance_engine.get_station_correlation_matrix", return_value=({}, True)),
+        patch("forecast.db.get_contract_metadata", return_value=None),
+        patch("data.kalshi_weather_monitor.get_weather_data", return_value={"members_high": [79.0, 80.0, 81.0]}),
+        patch("forecast.pricing_engine.calculate_pricing", return_value={"q_hat": 0.50}),
+        patch(
+            "forecast.covariance_engine.assemble_covariance_matrix",
+            return_value=np.array([[candidate_variance]], dtype=float),
+        ),
+        patch("forecast.covariance_engine.calculate_shrinkage_limit", return_value=5.0),
+        patch("forecast.covariance_engine.calculate_marginal_risk_charge", return_value=1.0),
+    ):
+        qty, _charge, debug = check_and_shrink_candidate(
+            candidate_contract=candidate,
+            candidate_side="YES",
+            candidate_price=0.50,
+            candidate_qty=5,
+            open_positions=[],
+            bankroll=10.0,
+        )
+
+    assert qty == expected_qty
+    assert debug["reason"] == expected_reason
+    if qty:
+        assert debug["projected_variance"] <= debug["limit"] + 1e-9

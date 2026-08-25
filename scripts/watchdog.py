@@ -19,6 +19,7 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -50,6 +51,49 @@ def _q(con, sql, params=()):
         return list(con.execute(sql, params))
     except sqlite3.Error:
         return []
+
+
+_LOG_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)?")
+
+
+def _count_recent_error_records(lines, cutoff: dt.datetime) -> int:
+    """Count recent timestamped error records, including their traceback body.
+
+    Python traceback continuation lines have no timestamp.  They inherit the
+    timestamp of the preceding log record; they must never compare lexically as
+    though their text were a date.
+    """
+    current_record_at: dt.datetime | None = None
+    current_record_has_error = False
+    count = 0
+    for line in lines:
+        match = _LOG_TIMESTAMP_RE.match(line)
+        if match:
+            if (
+                current_record_at is not None
+                and current_record_at >= cutoff
+                and current_record_has_error
+            ):
+                count += 1
+            try:
+                current_record_at = dt.datetime.strptime(
+                    match.group(1),
+                    "%Y-%m-%d %H:%M:%S",
+                ).replace(tzinfo=dt.timezone.utc)
+            except ValueError:
+                current_record_at = None
+            current_record_has_error = False
+        if current_record_at is not None and (
+            "Traceback" in line or "CRITICAL" in line
+        ):
+            current_record_has_error = True
+    if (
+        current_record_at is not None
+        and current_record_at >= cutoff
+        and current_record_has_error
+    ):
+        count += 1
+    return count
 
 
 def collect() -> dict[str, str]:
@@ -127,12 +171,9 @@ def collect() -> dict[str, str]:
 
     # 5. Error burst in the log.
     try:
-        cutoff = (now - dt.timedelta(minutes=ERROR_WINDOW_MIN)).strftime("%Y-%m-%d %H:%M")
-        n = 0
+        cutoff = now - dt.timedelta(minutes=ERROR_WINDOW_MIN)
         with open(LOG, errors="ignore") as fh:
-            for ln in fh:
-                if ln[:16] >= cutoff and ("Traceback" in ln or "CRITICAL" in ln):
-                    n += 1
+            n = _count_recent_error_records(fh, cutoff)
         if n >= ERROR_COUNT_ALERT:
             bad["errors"] = f"{n} errors/criticals in the last {ERROR_WINDOW_MIN}m."
     except OSError:
@@ -155,7 +196,11 @@ def collect() -> dict[str, str]:
             capture_output=True, text=True, cwd="/app",
         )
         if r.returncode != 0:
-            fails = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("FAIL")]
+            fails = [
+                line.strip()
+                for line in r.stdout.splitlines()
+                if line.strip().startswith("FAIL")
+            ]
             bad["contract_audit"] = "Boundary audit failing: " + (fails[0][:160] if fails else "see output")
 
     return bad

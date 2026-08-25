@@ -246,6 +246,69 @@ def test_execution_controller_reprices_at_final_post_boundary():
     assert broker.orders == []
 
 
+def test_execution_controller_rechecks_release_gate_after_final_replan(monkeypatch):
+    from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
+
+    class BrokerStub:
+        def __init__(self):
+            self.orders = []
+
+        def position_snapshot_status(self):
+            return {"fresh": True}
+
+        def has_fresh_position_snapshot(self):
+            return True
+
+        def get_quote(self, _ticker):
+            return {"yes_bid": 0.48, "yes_ask": 0.50, "yes_ask_size": 10}
+
+        def place_buy_order(self, *args, **kwargs):
+            self.orders.append((args, kwargs))
+            return {"status": "executed", "filled_qty": 1}
+
+    releases = iter(
+        [
+            {"entries_allowed": True, "current_release_verdict": "READY_FOR_LIVE"},
+            {"entries_allowed": False, "current_release_verdict": "BLOCKED"},
+        ]
+    )
+    monkeypatch.setattr(
+        "forecast.firewall.check_entry_firewall",
+        lambda ticker, bankroll: (True, ""),
+    )
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_release_status",
+        lambda: next(releases),
+    )
+
+    result = SimpleNamespace(
+        position_contracts=2,
+        side="YES",
+        is_taker_override=True,
+        strategy_family="weather_physics",
+        ev=0.20,
+        confidence=0.80,
+        ask_yes=0.50,
+    )
+    intent = TradeIntent(
+        contract={"local_symbol": "KXHIGHCHI-26AUG26-T80", "right": "C"},
+        result=result,
+        bankroll=58.15,
+        buying_power_usd=58.15,
+    )
+    broker = BrokerStub()
+    controller = KalshiExecutionController(broker)
+
+    execution = controller.execute_plan(
+        controller.plan_entry(intent),
+        forecast_yes_prob=0.80,
+    )
+
+    assert execution["status"] == "release_gate_blocked"
+    assert execution["execution_reason"] == "BLOCKED"
+    assert broker.orders == []
+
+
 def test_execution_controller_cannot_override_position_or_kelly_cap(monkeypatch):
     import config
     from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent

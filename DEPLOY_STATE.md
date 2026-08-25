@@ -10,7 +10,7 @@ Last verified directly against NYC: 2026-08-25
 | Runtime root | `/home/algo-runner/bot` |
 | Containers | `execution-engine`, `kalshi-cockpit` — both up when checked |
 | Images | `ghcr.io/futureisnowtech/trading-bot-main:latest` and dashboard companion |
-| Version | `19.20.0` |
+| Version | `19.20.1` |
 | SHA / branch | `master`; read the authoritative runtime stamp for the exact SHA |
 | Verified rollout | Base v19.20 rollout `2cff745d361ec4944605db80b2e1fa32a923745e` at `2026-08-25T04:51:25Z`; later v19.20 observability-only follow-ups must replace this SHA in the runtime stamp |
 | Open-Meteo commercial key | absent |
@@ -27,7 +27,7 @@ The stamped files are authoritative for deployed code identity:
 The live database remains canonical for trades and recent runtime evidence:
 `/home/algo-runner/bot/logs/trades.db`.
 
-## Deployed v19.20 system truth
+## Deployed v19.20.1 system truth
 
 NYC received the v19.20 deterministic-physics repair on 2026-08-25. The exact
 deployed SHA is deliberately not duplicated as a supposedly self-updating value
@@ -57,16 +57,28 @@ and `origin/master` must agree. The deployed version family:
   enforces the fee-inclusive 12% Kelly cap and aggregate 8% event cap, and
   makes covariance failures veto;
 - starts a new `v19.20.0-deterministic-physics-path` RBI evidence epoch and keeps the
-  governed 60/40 baseline binding until at least seven days and 24 officially
-  settled current-epoch samples exist, after which holdout validation and
+  governed 60/40 baseline binding until at least seven days and 24 independent,
+  officially settled current-epoch events exist, after which holdout validation and
   explicit human promotion are still required.
+- records canonical YES-basis probability plus RBI-required model/provider
+  fields for every market that reaches production pricing, including later
+  vetoes, and alerts through shared operator truth/Telegram if valid traces stop
+  advancing;
+- replays the production divergence probability shrink during challenger
+  scoring rather than validating only the pre-guard blend;
+- uses empirical covariance only after 90 raw NOAA days exist for every station;
+  before then, a gross comonotonic bound grants no YES/NO, cross-city, or
+  disjoint-bracket netting;
+- blocks fresh entries during deployment until the new SHA earns its own hosted
+  audit, and rechecks the release/firewall/snapshot gates after final quote
+  refresh immediately before any broker POST.
 
 ## Production proof status
 
 The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
-evidence for this refactor. On 2026-08-25, v19.20.0 passed:
+evidence for this refactor. On 2026-08-25, v19.20.1 passed:
 
-- complete repository suite: 422 passed;
+- complete repository suite: 446 passed;
 - clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
   contract audit, and strict repo-truth gate;
 - live Kalshi schema probe: structurally valid API with $58.73 balance;

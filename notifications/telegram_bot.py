@@ -10,7 +10,7 @@ import json
 from typing import Dict, Optional
 from html import escape
 from functools import wraps
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -22,7 +22,7 @@ from telegram.ext import (
 from telegram.constants import ParseMode, ChatAction
 
 import system_state
-from config import BOT_LOG_PATH, DB_PATH, REPO_ROOT, TELEGRAM_CHAT_ID
+from config import BOT_LOG_PATH, DB_PATH, TELEGRAM_CHAT_ID
 from notifications.ai_agent import ask_ai
 from notifications import sovereign_mobile_hud as hud
 
@@ -359,6 +359,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     execution_policy = policy.get("execution") or {}
     probability_policy = policy.get("probability") or {}
     rbi_policy = policy.get("rbi2") or {}
+    rbi_evidence = rbi_policy.get("evidence_health") or {}
     risk_policy = policy.get("risk") or {}
     balance = float(truth.get("balance_usd") or 0.0)
     active_markets = int(truth.get("active_markets") or 0)
@@ -373,6 +374,13 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             usd_spent = float(row[0] or 0.0)
     except Exception:
         pass
+
+    valid_trace_age = rbi_evidence.get("latest_valid_prediction_age_seconds")
+    valid_trace_age_text = (
+        f"{float(valid_trace_age) / 60.0:.1f}m"
+        if valid_trace_age is not None
+        else "unavailable"
+    )
 
     msg = (
         f"<b>KALSHI WEATHER ENGINE: LIVE</b>\n"
@@ -392,10 +400,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{float(rbi_policy.get('minimum_days') or 0.0):g} days, "
         f"{int(rbi_policy.get('independent_event_count') or 0)}/"
         f"{int(rbi_policy.get('required_independent_events') or 0)} official events\n"
+        f"RBI Evidence: {rbi_evidence.get('status') or 'unknown'}; "
+        f"latest valid trace {valid_trace_age_text} old\n"
         f"Risk: {int(risk_policy.get('max_qty_per_position') or 0)} contracts / "
         f"${float(risk_policy.get('base_position_cap_usd') or 0.0):g} base position / "
         f"{float(risk_policy.get('max_risk_per_event_pct') or 0.0):.0%} event / "
         f"{float(risk_policy.get('minimum_model_headroom_f') or 0.0):g}F headroom\n"
+        f"Covariance Fallback: "
+        f"{risk_policy.get('covariance_non_authoritative_mode') or 'unknown'}\n"
         f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
         f"Infra Blockers: {len(release.get('top_infrastructure_blockers') or [])}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"

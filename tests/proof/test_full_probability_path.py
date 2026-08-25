@@ -274,7 +274,7 @@ def test_production_pricing_branch_enforces_catastrophic_veto(monkeypatch):
         }
 
     monkeypatch.setattr(pe, "calculate_pricing", fake_pricing)
-    passes, _, _, factors, *_ = se._strategy_weather_details(
+    details = se._strategy_weather_details(
         ticker="KXHIGHCHI-26AUG25-T75",
         ask_yes=0.40,
         ask_no=0.60,
@@ -282,5 +282,11 @@ def test_production_pricing_branch_enforces_catastrophic_veto(monkeypatch):
         contract_name="Will the high temperature in Chicago be above 75°?",
         strike=75.0,
     )
+    passes, _, _, factors, *_ = details
     assert passes is False
     assert factors == ["catastrophic_divergence_veto (gap=98.00%)"]
+    # Catastrophic disagreement is still a hard trade veto, but its complete
+    # priced opportunity must remain available to the governed RBI review.
+    assert details[8]["q_gfs"] == pytest.approx(0.99)
+    assert details[8]["q_ecmwf"] == pytest.approx(0.01)
+    assert details[8]["q_decision_guarded"] == pytest.approx(0.6375)

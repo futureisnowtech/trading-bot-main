@@ -49,17 +49,23 @@ def _production_probability(
     rejects legacy rows that recorded HRRR without that required input.
     """
     from forecast.pricing_engine import log_odds_blend
+    from forecast.primitives import apply_divergence_probability_guard
 
+    blended = log_odds_blend(
+        _float_or_none(row.get("q_gfs")),
+        _float_or_none(row.get("q_ecmwf")),
+        _float_or_none(row.get("q_hrrr")),
+        {
+            "gfs": float(blend.get("gfs", 0.60)),
+            "ecmwf": float(blend.get("ecmwf", 0.40)),
+        },
+        float(row.get("hours_to_resolution") or 0.0),
+    )
     return _clip(
-        log_odds_blend(
+        apply_divergence_probability_guard(
+            blended,
             _float_or_none(row.get("q_gfs")),
             _float_or_none(row.get("q_ecmwf")),
-            _float_or_none(row.get("q_hrrr")),
-            {
-                "gfs": float(blend.get("gfs", 0.60)),
-                "ecmwf": float(blend.get("ecmwf", 0.40)),
-            },
-            float(row.get("hours_to_resolution") or 0.0),
         )
     )
 
@@ -417,7 +423,10 @@ def train_challenger(db_path: str = DB_PATH) -> dict[str, Any]:
         "independent_unit": "event_key",
         "sibling_strike_leakage": False,
         "event_weighting": "equal",
-        "probability_transform": "forecast.pricing_engine.log_odds_blend",
+        "probability_transform": (
+            "forecast.pricing_engine.log_odds_blend+"
+            "forecast.primitives.apply_divergence_probability_guard"
+        ),
         "hrrr_lead_time_splice_replayed": True,
         "official_outcomes_only": True,
         "learning_period_passed": True,

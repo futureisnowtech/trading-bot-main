@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -132,6 +133,185 @@ def test_record_prediction_uses_decision_trace_without_refetch_or_repricing(
     assert row["provider_at"] == "2026-08-14T11:55:00+00:00"
     assert provider["model_path"] == "decision-time-production-path"
     assert provider["model_probabilities"]["aigfs"] == pytest.approx(0.68)
+
+
+def test_no_side_evidence_keeps_q_hat_on_yes_basis(tmp_path):
+    from intelligence.evidence import record_prediction
+    from intelligence.schema import connect, init_intelligence_db
+
+    candidate = _candidate("submitted", decision="entered")
+    candidate["result"].side = "NO"
+    candidate["result"].q_hat = 0.18
+    candidate["result"].confidence = 0.82
+    candidate["result"].ask_yes = 0.84
+    candidate["result"].ask_no = 0.18
+    candidate["result"].pricing_trace = {
+        "q_gfs": 0.15,
+        "q_ecmwf": 0.23,
+        "q_decision_guarded": 0.18,
+    }
+
+    db_path = str(tmp_path / "no-side-basis.db")
+    init_intelligence_db(db_path)
+    prediction_id = record_prediction(
+        scan_id="no-side-basis",
+        candidate=candidate,
+        decision="entered",
+        reason="submitted",
+        db_path=db_path,
+    )
+
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT chosen_side, q_champion, features_json "
+            "FROM intelligence_predictions WHERE id=?",
+            (prediction_id,),
+        ).fetchone()
+    audit = json.loads(row["features_json"])["audit"]
+
+    assert row["chosen_side"] == "NO"
+    assert row["q_champion"] == pytest.approx(0.18)
+    assert audit["q_hat_yes"] == pytest.approx(0.18)
+    assert audit["chosen_side_probability"] == pytest.approx(0.82)
+    assert audit["chosen_side_price"] == pytest.approx(0.18)
+
+
+def test_post_pricing_veto_preserves_probability_trace_through_evidence(
+    tmp_path, monkeypatch
+):
+    import forecast.pricing_engine as pe
+    import forecast.strategy_engine as se
+    from intelligence.evidence import record_prediction
+    from intelligence.schema import connect, init_intelligence_db
+
+    provider_at = datetime.now(timezone.utc).timestamp()
+    weather = {
+        "timestamp": provider_at,
+        "provider_mode": "deterministic_multi_model",
+        "members_high": [90.0],
+        "ecmwf": {"members_high": [89.0]},
+        "aigefs": {"members_high": [88.0]},
+        "sigma_high": 1.0,
+        "intraday": {},
+    }
+    pricing = {
+        "q_hat": 0.80,
+        "q_hat_raw": 0.81,
+        "q_gfs": 0.78,
+        "q_ecmwf": 0.76,
+        "q_aigfs": 0.77,
+        "q_hrrr": None,
+        "lambda_scaler": 1.0,
+        "gfs_weight": 0.60,
+        "ecmwf_weight": 0.40,
+        "hrrr_weight": 0.0,
+        "physics_gfs": {"adjustment_f": 0.2},
+        "physics_ecmwf": {"adjustment_f": 0.1},
+        "consensus_projection": 90.0,
+        "model_path": "decision-time-production-path",
+        "physics_method": "bounded_heuristic_v1",
+        "physics_validation_status": "active",
+    }
+    monkeypatch.setattr(se, "get_weather_data", lambda _ticker: weather)
+    monkeypatch.setattr(
+        se, "get_contract_weather_data", lambda *_args, **_kwargs: weather
+    )
+    monkeypatch.setattr(pe, "calculate_pricing", lambda *_args, **_kwargs: pricing)
+    monkeypatch.setattr(se, "KALSHI_MIN_ENTRY_PRICE", 0.34)
+
+    expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+    contract = {
+        "local_symbol": "KXHIGHLAX-26AUG26-T85",
+        "contract_name": "Will the high temperature in Los Angeles be above 85?",
+        "strike": 85.0,
+        "last_trade_at": expiry.isoformat(),
+    }
+    quote_at = datetime.now(timezone.utc).isoformat()
+    yes_quote = {"bid": 0.08, "ask": 0.10, "spread": 0.02, "ts": quote_at}
+    no_quote = {"bid": 0.88, "ask": 0.90, "spread": 0.02, "ts": quote_at}
+
+    result = se.evaluate_contract(
+        contract=contract,
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=yes_quote,
+        no_quote=no_quote,
+        bankroll=50.0,
+    )
+
+    assert result is not None
+    assert result.econ_approved is False
+    assert result.position_contracts == 0
+    assert result.veto_reason.startswith("penny_veto")
+    assert result.q_hat == pytest.approx(0.80)
+    assert result.pricing_trace["q_decision_guarded"] == pytest.approx(0.80)
+    assert result.pricing_trace["q_gfs"] == pytest.approx(0.78)
+    assert result.pricing_trace["q_ecmwf"] == pytest.approx(0.76)
+    assert result.pricing_trace["q_aigfs"] == pytest.approx(0.77)
+
+    db_path = str(tmp_path / "veto-trace.db")
+    init_intelligence_db(db_path)
+    candidate = {
+        "contract": contract,
+        "snapshot": SimpleNamespace(
+            ticker=contract["local_symbol"],
+            contract_name=contract["contract_name"],
+            yes_quote=yes_quote,
+            no_quote=no_quote,
+        ),
+        "result": result,
+    }
+    prediction_id = record_prediction(
+        scan_id="post-pricing-veto",
+        candidate=candidate,
+        decision="econ_veto",
+        reason=result.veto_reason,
+        db_path=db_path,
+    )
+
+    with connect(db_path) as conn:
+        row = conn.execute(
+            """SELECT q_gfs, q_ecmwf, q_champion, features_json
+                 FROM intelligence_predictions WHERE id=?""",
+            (prediction_id,),
+        ).fetchone()
+    features = json.loads(row["features_json"])
+
+    assert row["q_gfs"] == pytest.approx(0.78)
+    assert row["q_ecmwf"] == pytest.approx(0.76)
+    assert row["q_champion"] == pytest.approx(0.80)
+    assert features["provider"]["provider_mode"] == "deterministic_multi_model"
+    assert features["provider"]["model_path"] == "decision-time-production-path"
+    assert features["provider"]["model_probabilities"]["aigfs"] == pytest.approx(0.77)
+
+
+def test_pre_pricing_weather_veto_is_unscored(monkeypatch):
+    import forecast.strategy_engine as se
+
+    monkeypatch.setattr(se, "get_weather_data", lambda _ticker: None)
+    expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+    result = se.evaluate_contract(
+        contract={
+            "local_symbol": "KXHIGHLAX-26AUG26-T85",
+            "contract_name": "Will the high temperature in Los Angeles be above 85?",
+            "strike": 85.0,
+            "last_trade_at": expiry.isoformat(),
+        },
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote={"ask": 0.50},
+        no_quote={"ask": 0.50},
+        bankroll=50.0,
+    )
+
+    assert result is not None
+    assert result.veto_reason == "missing_weather_data"
+    assert result.q_hat == 0.0
+    assert result.pricing_trace == {}
 
 
 def test_yes_path_audit_summary_aggregates_blockers_and_entries(tmp_path):

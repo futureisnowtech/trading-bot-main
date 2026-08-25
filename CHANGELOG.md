@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-08-25 (v19.20.1 production hardening)
+- Preserved canonical YES-basis probability and the RBI-required model/provider fields for every weather market that reached production pricing, even when a downstream economics, divergence, price, contract-type, headroom, or risk guard vetoed entry; pre-pricing failures remain explicitly unscored. RBI telemetry now reports bounded recent evidence health, Jarvis/Telegram share it, and the daemon sentinel alerts when complete current-epoch traces stop advancing.
+- Made RBI challenger scoring replay the same GFS/ECMWF divergence confidence shrink used by the production decision after the log-odds/HRRR blend. The mandatory seven-day, 24-independent-event, chronological-holdout, and human-promotion gates remain unchanged.
+- Replaced the non-authoritative covariance default with a sign-safe gross comonotonic upper bound, so incomplete NOAA history grants no YES/NO, cross-city, or disjoint-bracket netting. Empirical covariance now requires 90 raw observations for every station before imputation; numeric covariance failures still veto.
+- Closed the deployment warmup bypass: a new SHA cannot inherit the prior build's entry authorization and remains blocked until its own hosted audit passes.
+
 ## 2026-08-25 (v19.20.0 production)
 - Deployed the exact protected v19.20 build to NYC and independently verified exact SHA parity, healthy services, fresh deterministic weather, broker/runtime balance parity, and a hosted `READY_FOR_LIVE` verdict with zero blockers.
 - Unified Jarvis, Telegram commands, and the mobile HUD behind one production-policy contract carrying build SHA, IOC taker-only execution, the deterministic physics model path, RBI learning/promotion state, and binding risk caps. Removed the unused duplicate Jarvis prompt, direct conversational shell/file/release mutation tools, and Telegram's direct process-reboot command; operator changes now use governed proposals and explicit approval.

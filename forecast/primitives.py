@@ -33,6 +33,60 @@ def clip_prob(p: float) -> float:
     return max(CLIP_LO, min(CLIP_HI, float(p)))
 
 
+def convergence_guardrail(
+    q_gfs: float | None,
+    q_ecmwf: float | None,
+) -> dict[str, float | bool]:
+    """Return the production GFS/ECMWF agreement and divergence controls."""
+    available = [float(q) for q in (q_gfs, q_ecmwf) if q is not None]
+    if len(available) < 2:
+        return {
+            "convergence_multiplier": 1.0,
+            "divergence_gap": 0.0,
+            "divergence_size_multiplier": 1.0,
+            "confidence_scale": 1.0,
+            "catastrophic_divergence": False,
+        }
+
+    yes_agree = all(q > 0.75 for q in available)
+    no_agree = all(q < 0.25 for q in available)
+    divergence_gap = max(available) - min(available)
+    confidence_scale = 1.0
+    divergence_size_multiplier = 1.0
+    if divergence_gap > 0.20:
+        confidence_scale = max(
+            0.55,
+            1.0 - min(0.45, (divergence_gap - 0.20) * 0.90),
+        )
+        divergence_size_multiplier = max(
+            0.60,
+            1.0 - min(0.40, (divergence_gap - 0.20) * 0.80),
+        )
+
+    return {
+        "convergence_multiplier": 1.5 if (yes_agree or no_agree) else 1.0,
+        "divergence_gap": divergence_gap,
+        "divergence_size_multiplier": divergence_size_multiplier,
+        "confidence_scale": confidence_scale,
+        "catastrophic_divergence": divergence_gap > 0.70,
+    }
+
+
+def apply_divergence_probability_guard(
+    probability: float,
+    q_gfs: float | None,
+    q_ecmwf: float | None,
+) -> float:
+    """Replay the live divergence shrink in canonical YES-probability space."""
+    guardrail = convergence_guardrail(q_gfs, q_ecmwf)
+    confidence_scale = float(guardrail["confidence_scale"])
+    guarded = float(probability)
+    if confidence_scale < 1.0:
+        guarded = 0.5 + ((guarded - 0.5) * confidence_scale)
+        guarded = max(0.03, min(0.97, guarded))
+    return guarded
+
+
 def log_odds(p: float) -> float:
     """Return the log-odds for a clipped probability."""
     p = clip_prob(p)

@@ -194,7 +194,11 @@ def _system_instruction(surface: str) -> str:
         "and bounded physics; there is no commercial Open-Meteo ensemble. RBI 2.0 may "
         "collect official evidence during its gate, but learned weights are not active "
         "until at least seven days and 24 independent events pass and a human promotes "
-        "the challenger. Use get_production_policy_status for exact current values.\n\n"
+        "the challenger. Vetoed markets that reached canonical pricing remain RBI "
+        "evidence; pre-pricing failures do not. Portfolio covariance uses empirical "
+        "PSD correlation when authoritative and a gross comonotonic no-netting bound "
+        "otherwise; calculation errors veto. Use get_production_policy_status for "
+        "exact current values.\n\n"
         f"### ACCESS SCOPE ###\n{scope}\n\n"
         f"### CONTEXTUAL TRUTH ###\n{context}"
     )

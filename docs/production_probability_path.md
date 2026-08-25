@@ -10,7 +10,7 @@ NYC has no commercial Open-Meteo key. Production requests keyless deterministic 
 
 The important continuity is that both proven endpoints use the canonical `forecast.pricing_engine.calculate_pricing()` production branch. Later releases changed calibration, physics, execution, and risk details, so the entire July-to-present period must not be described as one unchanged algorithm.
 
-## What v19.20.0 runs in production
+## What v19.20.1 runs in production
 
 1. `data/kalshi_weather_monitor.py` fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS forecasts, then attaches METAR and HRRR data where available. There is no commercial ensemble/key branch and no ICON input.
 2. The top-level provider identity is always GFS. If GFS is absent, the bundle fails closed instead of copying ECMWF or AIGFS into the GFS slot. Partial real models remain missing rather than being converted into fake neutral probabilities.
@@ -18,9 +18,10 @@ The important continuity is that both proven endpoints use the canonical `foreca
 4. Daily-HIGH radiative/precipitation cooling and daily-LOW cloud/moisture/wind-mixing lift are bounded to 2.5°F and applied to the forecast variable before the CDF. Hourly temperature, rain, snow, and wind receive no unsafe cross-variable temperature shift. These coefficients are explicitly labeled `bounded_heuristic_v1`: their plumbing and dimensional behavior are proof-covered, but their forecast-skill benefit is not yet empirically established and must be judged from the new RBI evidence epoch.
 5. Promoted RBI weights choose the GFS/ECMWF log-odds split. The actual contract-aligned AIGFS forecast has no voting weight: its disagreement with GFS/ECMWF widens the kernels and reduces order size. Near-resolution HRRR may splice into daily-HIGH.
 6. Live-call isotonic refitting is retired. The governed raw blend is identity-clamped until a versioned, walk-forward-validated calibration artifact has its own promotion gate.
-7. The convergence guardrail awards 1.5x only for unanimous GFS/ECMWF same-tail agreement. Gaps above 20 points pull `q_hat` toward 50% and reduce size; gaps above 70 points veto the entry.
+7. The convergence guardrail awards 1.5x only for unanimous GFS/ECMWF same-tail agreement. Gaps above 20 points pull `q_hat` toward 50% and reduce size; gaps above 70 points veto the entry. RBI challenger scoring replays this same probability shrink after the production log-odds/HRRR blend.
 8. The strategy compares guarded probability with live YES/NO quotes, ceiled fees, spread, freshness, and exposure. Convergence, divergence, predictive sigma, AIGFS uncertainty, and same-event penalties all reach the taker-only IOC size solver.
-9. Fee-inclusive order cost is capped by the position rail and `KALSHI_KELLY_CAP`; aggregate family exposure is capped by `KALSHI_MAX_RISK_PER_EVENT_PCT`; covariance errors fail closed.
+9. Fee-inclusive order cost is capped by the position rail and `KALSHI_KELLY_CAP`; aggregate family exposure is capped by `KALSHI_MAX_RISK_PER_EVENT_PCT`; covariance errors fail closed. Empirical covariance requires 90 raw NOAA days for every station. Until then, a gross comonotonic bound gives no YES/NO, cross-city, or disjoint-bracket netting credit.
+10. Every market that reaches canonical pricing records its YES-basis decision probability and the model/provider fields required for RBI replay even when a later guardrail vetoes the trade. Pre-pricing failures remain explicitly unscored. Bounded evidence-health telemetry and the Telegram sentinel report if valid current-epoch traces stop advancing.
 
 ## RBI 2.0 learning period
 
@@ -28,12 +29,18 @@ Production uses a versioned evidence epoch named
 `v19.20.0-deterministic-physics-path`. Predictions from earlier probability paths do
 not count toward this epoch. RBI remains on the governed 60/40 GFS/ECMWF
 baseline until current-epoch, officially settled evidence spans at least seven
-days and contains at least 24 clean market samples. Passing that observation
+days and contains at least 24 clean independent events. Passing that observation
 gate only permits challenger training: the challenger must still beat the
 effective champion on a chronological holdout without excessive segment
 regression, and a human must explicitly promote it. Promotion rechecks the
 epoch, duration, sample count, and validation result, so a stale artifact cannot
 bypass the learning period.
+
+For each ticker, training intentionally uses the final valid pre-settlement
+forecast, then weights sibling strikes as one event. This avoids repeated-scan
+and strike-count domination, but it means the first epoch primarily validates
+near-settlement blend skill rather than claiming uniform skill across the full
+five-day entry horizon.
 
 ## Repaired discrepancies from the old system
 
@@ -49,4 +56,4 @@ bypass the learning period.
 
 The former unconditional `convergence_multiplier = 1.5` and inert `divergence_size_multiplier = 1.0` have been replaced by the selected legacy guardrail described above. The guardrail is a hard veto only above a 70-point maximum physical-model gap; the 20-to-70-point region is deliberately a soft probability and size penalty.
 
-Quarter Kelly is active. Production enforces `KALSHI_KELLY_CAP=0.12` against fee-inclusive order cost and `KALSHI_MAX_RISK_PER_EVENT_PCT=0.08` against aggregate family exposure. Quantity/dollar position clamps, deployed-cap gate, concurrent/family counts, broker exposure, regional cap, and a fail-closed covariance budget remain additive protections.
+Quarter Kelly is active. Production enforces `KALSHI_KELLY_CAP=0.12` against fee-inclusive order cost and `KALSHI_MAX_RISK_PER_EVENT_PCT=0.08` against aggregate family exposure. Quantity/dollar position clamps, deployed-cap gate, concurrent/family counts, broker exposure, regional cap, and a fail-closed covariance budget remain additive protections. If station history is not authoritative, covariance admission uses the gross comonotonic upper bound rather than an empirical or default correlation matrix.

@@ -556,6 +556,74 @@ def test_telegram_surface_exposes_plain_english_operator_shortcuts():
     assert "os._exit" not in text
 
 
+def test_telegram_status_renders_rbi_evidence_and_covariance_truth(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import notifications.telegram_bot as telegram_bot
+
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_live_kalshi_status",
+        lambda: {
+            "balance_usd": 58.15,
+            "active_markets": 580,
+            "broker_positions_count": 2,
+            "position_drift": {"has_drift": False},
+            "production_policy": {
+                "version": "19.20.1",
+                "short_sha": "abcdef0",
+                "execution": {"entry_route": "taker_only_ioc"},
+                "probability": {
+                    "model_path": "deterministic_gfs_ecmwf_aigfs_hrrr_physics",
+                    "physics_method": "bounded_heuristic_v1",
+                },
+                "rbi2": {
+                    "status": "rbi2_learning_period",
+                    "observed_days": 0.1,
+                    "minimum_days": 7.0,
+                    "independent_event_count": 0,
+                    "required_independent_events": 24,
+                    "evidence_health": {
+                        "status": "healthy",
+                        "latest_valid_prediction_age_seconds": 120.0,
+                    },
+                },
+                "risk": {
+                    "max_qty_per_position": 15,
+                    "base_position_cap_usd": 10.0,
+                    "max_risk_per_event_pct": 0.08,
+                    "minimum_model_headroom_f": 2.0,
+                    "covariance_non_authoritative_mode": (
+                        "non_authoritative_gross_comonotonic"
+                    ),
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_release_status",
+        lambda truth=None: {
+            "entries_allowed": True,
+            "current_release_verdict": "READY_FOR_LIVE",
+            "provider_mode": "deterministic_multi_model",
+            "top_infrastructure_blockers": [],
+        },
+    )
+
+    captured = {}
+
+    class Message:
+        async def reply_text(self, text, **kwargs):
+            captured["text"] = text
+            captured["kwargs"] = kwargs
+
+    update = SimpleNamespace(effective_message=Message())
+    asyncio.run(telegram_bot.status_command.__wrapped__(update, None))
+
+    assert "RBI Evidence: healthy; latest valid trace 2.0m old" in captured["text"]
+    assert "Covariance Fallback: non_authoritative_gross_comonotonic" in captured["text"]
+
+
 def test_brain_surfaces_have_no_direct_mutation_tools():
     from runtime import brain
 

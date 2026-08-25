@@ -16,6 +16,10 @@ from data.kalshi_weather_monitor import STATIONS
 
 logger = logging.getLogger("covariance_engine")
 
+NON_AUTHORITATIVE_COVARIANCE_MODE = "non_authoritative_gross_comonotonic"
+AUTHORITATIVE_COVARIANCE_MODE = "authoritative_empirical_station_correlation"
+MIN_AUTHORITATIVE_STATION_DAYS = 90
+
 
 class CovarianceDataUnavailable(RuntimeError):
     """Raised when portfolio risk cannot be evaluated from real pricing inputs."""
@@ -65,17 +69,20 @@ def get_station_correlation_matrix(db_path: str | None, stations: List[str]) -> 
         if df.empty:
             return defaults, False
 
-        df_pivot = df.pivot(index="date", columns="station", values="temp_max")
-        if len(df_pivot) < 60:
-            return defaults, False
+        raw_pivot = df.pivot(index="date", columns="station", values="temp_max")
 
-        df_pivot = df_pivot.ffill().bfill()
+        # Authority is earned only from real observations.  Evaluate coverage
+        # before filling gaps so one observation cannot be expanded into a
+        # fictitious 90-day station history by ffill/bfill.
+        is_authoritative = all(
+            station in raw_pivot.columns
+            and int(raw_pivot[station].count()) >= MIN_AUTHORITATIVE_STATION_DAYS
+            for station in stations
+        )
 
-        # Check if we have at least 60 days of data for each registered station
-        is_authoritative = True
-        for s in stations:
-            if s not in df_pivot.columns or df_pivot[s].count() < 60:
-                is_authoritative = False
+        # Imputation is permitted solely for computing a shadow correlation
+        # estimate.  The raw coverage result above remains the authority truth.
+        df_pivot = raw_pivot.ffill().bfill()
 
         # EWMA lambda = 0.97 -> alpha = 1 - lambda = 0.03
         df_ewm = df_pivot.ewm(alpha=0.03, adjust=False).mean()
@@ -219,16 +226,40 @@ def assemble_covariance_matrix(
         )
         resolved_semantics.append((ticker, sem))
 
+    probabilities: List[float] = []
+    for ticker, _sem in resolved_semantics:
+        try:
+            q_hat = float(pricing_dict[ticker]["q_hat"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CovarianceDataUnavailable(
+                f"invalid_probability:{ticker}"
+            ) from exc
+        if not math.isfinite(q_hat):
+            raise CovarianceDataUnavailable(f"invalid_probability:{ticker}")
+        probabilities.append(max(0.001, min(0.999, q_hat)))
+
+    if not is_authoritative:
+        # No empirical NOAA authority means no diversification credit.  Treat
+        # every binary payoff as comonotonic and let the admission calculation
+        # use gross (absolute) held quantities.  Together those choices impose
+        # the sign-safe upper bound:
+        #     variance = (sum_i |w_i| * sqrt(q_i * (1-q_i))) ** 2
+        # A tiny diagonal addition keeps the matrix numerically positive
+        # definite and is conservative rather than granting accidental netting.
+        standard_deviations = np.sqrt(
+            np.array([q * (1.0 - q) for q in probabilities], dtype=float)
+        )
+        Sigma = np.outer(standard_deviations, standard_deviations)
+        Sigma += np.eye(N, dtype=float) * 1e-6
+        return Sigma
+
     for i in range(N):
         t_i, sem_i = resolved_semantics[i]
-        q_i = pricing_dict.get(t_i, {}).get("q_hat", 0.5)
-        # Floor denominator & clamp probability input (SPEC Rule 5)
-        qi_clamped = max(0.001, min(0.999, q_i))
+        qi_clamped = probabilities[i]
 
         for j in range(i, N):
             t_j, sem_j = resolved_semantics[j]
-            q_j = pricing_dict.get(t_j, {}).get("q_hat", 0.5)
-            qj_clamped = max(0.001, min(0.999, q_j))
+            qj_clamped = probabilities[j]
 
             if i == j:
                 Sigma[i, i] = qi_clamped * (1.0 - qi_clamped)
@@ -300,8 +331,10 @@ def assemble_covariance_matrix(
                             cov=[[1.0, rho], [rho, 1.0]]
                         )
                         cov_val = phi2 - qi_clamped * qj_clamped
-                    except Exception:
-                        cov_val = 0.0
+                    except Exception as exc:
+                        raise CovarianceDataUnavailable(
+                            f"copula_covariance_unavailable:{t_i}:{t_j}"
+                        ) from exc
 
                 Sigma[i, j] = cov_val
                 Sigma[j, i] = cov_val
@@ -316,8 +349,10 @@ def assemble_covariance_matrix(
             eigvals, eigvecs = np.linalg.eigh(Sigma)
             eigvals_floored = np.clip(eigvals, 1e-6, None)
             Sigma = eigvecs @ np.diag(eigvals_floored) @ eigvecs.T
-        except Exception:
-            pass
+        except Exception as exc:
+            raise CovarianceDataUnavailable(
+                "covariance_psd_regularization_failed"
+            ) from exc
 
     return Sigma
 
@@ -458,6 +493,17 @@ def check_and_shrink_candidate(
     # 2. Get correlation matrix R
     station_codes = [loc["icao"] for loc in STATIONS.values()]
     R, is_authoritative = get_station_correlation_matrix(db_path, station_codes)
+    covariance_mode = (
+        AUTHORITATIVE_COVARIANCE_MODE
+        if is_authoritative
+        else NON_AUTHORITATIVE_COVARIANCE_MODE
+    )
+    covariance_debug = {
+        "covariance_mode": covariance_mode,
+        "station_correlation_authoritative": bool(is_authoritative),
+        "non_netting": not is_authoritative,
+        "fallback_pairwise_correlation": None if is_authoritative else 1.0,
+    }
 
     # 3. Pricing and weather dict
     contracts_all = open_contracts + [candidate_contract]
@@ -499,9 +545,18 @@ def check_and_shrink_candidate(
 
     # 5. Extract components
     N_open = len(open_contracts)
-    w_open = np.array([float(pos["qty"]) * (1.0 if pos["side"] == "YES" else -1.0) for pos in open_contracts])
+    w_open_signed = np.array([
+        float(pos["qty"]) * (1.0 if pos["side"] == "YES" else -1.0)
+        for pos in open_contracts
+    ])
+    # With no authoritative station history, opposite held sides and disjoint
+    # brackets are not accepted as hedges.  Gross quantities make the fallback
+    # invariant to YES/NO signs and prevent an unproven negative covariance from
+    # increasing candidate capacity.
+    w_open = np.abs(w_open_signed) if not is_authoritative else w_open_signed
     candidate_idx = N_open
     candidate_side_sign = 1.0 if candidate_side == "YES" else -1.0
+    candidate_risk_sign = candidate_side_sign if is_authoritative else 1.0
 
     # 6. Current portfolio check
     var_limit = (0.08 * bankroll) ** 2
@@ -513,7 +568,8 @@ def check_and_shrink_candidate(
                 "reason": "portfolio_already_over_budget",
                 "var_current": var_current,
                 "limit": var_limit,
-                "qty": 0
+                "qty": 0,
+                **covariance_debug,
             }
     else:
         var_current = 0.0
@@ -523,7 +579,7 @@ def check_and_shrink_candidate(
         w_open,
         Sigma_full,
         candidate_idx,
-        candidate_side_sign,
+        candidate_risk_sign,
         bankroll
     )
     max_qty_by_variance = min(candidate_qty, int(math.floor(limit_K)))
@@ -543,7 +599,8 @@ def check_and_shrink_candidate(
             "reason": "shrunk_to_zero",
             "max_by_variance": max_qty_by_variance,
             "max_by_backstop": max_qty_by_backstop,
-            "qty": 0
+            "qty": 0,
+            **covariance_debug,
         }
 
     # 9. Marginal Risk Charge
@@ -551,7 +608,7 @@ def check_and_shrink_candidate(
         w_open,
         Sigma_full,
         candidate_idx,
-        candidate_side_sign,
+        candidate_risk_sign,
         bankroll
     )
     final_qty = int(math.floor(allowed_qty * charge_factor))
@@ -564,4 +621,5 @@ def check_and_shrink_candidate(
         "max_by_backstop": max_qty_by_backstop,
         "var_current": var_current,
         "limit": var_limit,
+        **covariance_debug,
     }

@@ -68,7 +68,9 @@ def test_rbi2_requires_explicit_promotion(tmp_path):
     challenger = train_challenger(db_path=db_path)
     assert challenger["status"] == "challenger_ready"
     assert challenger["validation"]["independent_unit"] == "event_key"
-    assert challenger["validation"]["probability_transform"].endswith("log_odds_blend")
+    assert challenger["validation"]["probability_transform"].endswith(
+        "apply_divergence_probability_guard"
+    )
     assert challenger["validation"]["independent_event_count"] == 32
     assert get_active_model_weights("HIGH", db_path=db_path) == before
     promote_challenger(challenger["artifact_id"], promoted_by="test", reason="validated", db_path=db_path)
@@ -79,6 +81,7 @@ def test_rbi2_requires_explicit_promotion(tmp_path):
 
 def test_rbi2_scores_the_exact_production_log_odds_path_with_hrrr():
     from forecast.pricing_engine import log_odds_blend
+    from forecast.primitives import apply_divergence_probability_guard
 
     row = {
         "q_gfs": 0.91,
@@ -89,10 +92,16 @@ def test_rbi2_scores_the_exact_production_log_odds_path_with_hrrr():
     weights = {"gfs": 0.65, "ecmwf": 0.35}
 
     replayed = _production_probability(row, weights)
-    production = log_odds_blend(0.91, 0.22, 0.78, weights, 9.0)
+    raw_production = log_odds_blend(0.91, 0.22, 0.78, weights, 9.0)
+    production = apply_divergence_probability_guard(
+        raw_production,
+        row["q_gfs"],
+        row["q_ecmwf"],
+    )
     arithmetic = 0.65 * 0.91 + 0.35 * 0.22
 
     assert replayed == pytest.approx(production)
+    assert replayed != pytest.approx(raw_production)
     assert replayed != pytest.approx(arithmetic)
 
 

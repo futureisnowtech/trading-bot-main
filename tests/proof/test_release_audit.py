@@ -811,7 +811,7 @@ def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
     assert "host_service_status_artifact_missing" in payload["blockers"]
 
 
-def test_build_deploy_pending_artifact_preserves_last_passing_gate():
+def test_build_deploy_pending_artifact_blocks_new_build_despite_prior_pass():
     from runtime.release_gate import build_deploy_pending_artifact
 
     payload = build_deploy_pending_artifact(
@@ -834,11 +834,11 @@ def test_build_deploy_pending_artifact_preserves_last_passing_gate():
     )
 
     assert payload["mode"] == "deploy_pending"
-    assert payload["verdict"] == "PASS_WITH_WARNINGS"
-    assert payload["entries_allowed"] is True
-    assert payload["blockers"] == []
-    assert payload["warnings"] == ["release_audit_pending_new_build"]
-    assert payload["details"]["live_truth"]["broker_connected"] is True
+    assert payload["verdict"] == "BLOCKED"
+    assert payload["entries_allowed"] is False
+    assert payload["blockers"] == ["release_audit_pending_new_build"]
+    assert payload["warnings"] == []
+    assert payload["details"]["prior_release"]["verdict"] == "READY_FOR_LIVE"
 
 
 def test_build_deploy_pending_artifact_keeps_existing_blocked_state():

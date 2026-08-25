@@ -124,24 +124,16 @@ def build_deploy_pending_artifact(
     branch: str,
     deployed_at_utc: str,
 ) -> dict[str, Any]:
-    """Build the temporary artifact written between container restart and hosted audit.
+    """Block fresh entries between container restart and the new build's audit.
 
-    If the currently running release is already passing, preserve that tradable state
-    during the short deploy window and surface the new-build condition as a warning.
-    If the currently running release is already blocked, keep it blocked.
+    A passing verdict belongs to one exact build.  Carrying the prior build's
+    permission onto a new SHA allowed unaudited code to trade during warmup.
+    Preserve prior provenance for diagnosis, but never its entry authorization.
     """
     prior = prior_release if isinstance(prior_release, dict) else {}
     prior_verdict = str(
         prior.get("verdict") or prior.get("current_release_verdict") or ""
     ).strip()
-    prior_entries_allowed = bool(prior.get("entries_allowed"))
-    prior_details = prior.get("details") if isinstance(prior.get("details"), dict) else {}
-    prior_last_success = str(
-        prior.get("last_successful_audit_at") or prior.get("as_of") or ""
-    ).strip()
-
-    passing = prior_entries_allowed and prior_verdict in PASSING_VERDICTS
-
     payload: dict[str, Any] = {
         "mode": "deploy_pending",
         "as_of": deployed_at_utc,
@@ -165,17 +157,6 @@ def build_deploy_pending_artifact(
             },
         },
     }
-
-    if passing:
-        payload["verdict"] = VERDICT_PASS_WITH_WARNINGS
-        payload["entries_allowed"] = True
-        payload["last_successful_audit_at"] = prior_last_success
-        payload["blockers"] = []
-        payload["warnings"] = ["release_audit_pending_new_build"]
-        for key in ("live_truth", "provider_status", "balance_truth"):
-            value = prior_details.get(key)
-            if isinstance(value, dict) and value:
-                payload["details"][key] = value
 
     return payload
 

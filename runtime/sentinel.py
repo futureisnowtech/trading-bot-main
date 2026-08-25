@@ -133,9 +133,38 @@ def _check_pending_approvals() -> tuple[str, bool, str]:
     return "pending_approvals", True, f"{n} change(s) awaiting cockpit approval: {names}."
 
 
+def _check_rbi_evidence() -> tuple[str, bool, str]:
+    """Alert if live scans stop producing complete current-epoch model traces."""
+    from intelligence.health import get_rbi_evidence_health
+
+    health = get_rbi_evidence_health()
+    issues = list(health.get("issues") or [])
+    prediction_age = health.get("latest_prediction_age_seconds")
+    valid_age = health.get("latest_valid_prediction_age_seconds")
+    run = health.get("latest_run") or {}
+    run_age = run.get("age_seconds")
+    if prediction_age is not None and float(prediction_age) > 30 * 60:
+        issues.append("prediction_evidence_stale_over_30m")
+    if valid_age is not None and float(valid_age) > 30 * 60:
+        issues.append("valid_pricing_trace_stale_over_30m")
+    if run_age is not None and float(run_age) > 20 * 3600:
+        issues.append("intelligence_run_stale_over_20h")
+
+    is_bad = str(health.get("status") or "unknown") != "healthy" or bool(issues)
+    summary = ", ".join(dict.fromkeys(str(issue) for issue in issues)) or "unknown"
+    return (
+        "rbi_evidence",
+        is_bad,
+        "RBI evidence health is degraded: "
+        f"{summary}. Trading remains governed by the 60/40 baseline; inspect "
+        "JARVIS or /status before any promotion.",
+    )
+
+
 _CHECKS: list[Callable[[], tuple[str, bool, str]]] = [
     _check_entries_allowed,
     _check_entry_stall,
+    _check_rbi_evidence,
     _check_pending_approvals,
 ]
 

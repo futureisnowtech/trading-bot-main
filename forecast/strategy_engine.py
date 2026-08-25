@@ -26,8 +26,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import numpy as np
-
 from config import (
     CITY_BLACKLIST,
     DB_PATH,
@@ -41,11 +39,11 @@ from config import (
     KALSHI_EXPENSIVE_YES_THRESHOLD,
     KALSHI_KELLY_CAP,
     KALSHI_KELLY_FRACTION,
-    KALSHI_MAX_CONCURRENT_POSITIONS,
+    KALSHI_MAX_CONCURRENT_POSITIONS,  # noqa: F401 - compatibility export
     KALSHI_MAX_DEPLOYED_PCT,
     KALSHI_MIN_MODEL_HEADROOM_F,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
-    KALSHI_SAME_EVENT_FAMILY_CAP,
+    KALSHI_SAME_EVENT_FAMILY_CAP,  # noqa: F401 - compatibility export
     KALSHI_MIN_ENTRY_PRICE,
     KALSHI_MAX_SIGMA,
     KALSHI_MAX_QTY_PER_POSITION,
@@ -63,12 +61,15 @@ from config import (
     max_kalshi_contracts_for_budget,
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
+from forecast.primitives import (
+    apply_divergence_probability_guard,
+    convergence_guardrail,
+)
 from forecast.weather_contracts import (
     is_hourly_weather_contract,
     probability_from_members,
     resolve_weather_contract,
     weather_freshness_limit_minutes,
-    weather_mode_for_ticker,
 )
 
 logger = logging.getLogger(__name__)
@@ -968,38 +969,7 @@ def _convergence_guardrail(
     gaps over 20 points shrink q_hat toward 0.50 and size, and the maximum
     pairwise gap over 70 points is a hard veto.
     """
-    available = [float(q) for q in (q_gfs, q_ecmwf) if q is not None]
-    if len(available) < 2:
-        return {
-            "convergence_multiplier": 1.0,
-            "divergence_gap": 0.0,
-            "divergence_size_multiplier": 1.0,
-            "confidence_scale": 1.0,
-            "catastrophic_divergence": False,
-        }
-
-    yes_agree = all(q > 0.75 for q in available)
-    no_agree = all(q < 0.25 for q in available)
-    divergence_gap = max(available) - min(available)
-    confidence_scale = 1.0
-    divergence_size_multiplier = 1.0
-    if divergence_gap > 0.20:
-        confidence_scale = max(
-            0.55,
-            1.0 - min(0.45, (divergence_gap - 0.20) * 0.90),
-        )
-        divergence_size_multiplier = max(
-            0.60,
-            1.0 - min(0.40, (divergence_gap - 0.20) * 0.80),
-        )
-
-    return {
-        "convergence_multiplier": 1.5 if (yes_agree or no_agree) else 1.0,
-        "divergence_gap": divergence_gap,
-        "divergence_size_multiplier": divergence_size_multiplier,
-        "confidence_scale": confidence_scale,
-        "catastrophic_divergence": divergence_gap > 0.70,
-    }
+    return convergence_guardrail(q_gfs, q_ecmwf)
 
 
 def _strategy_weather_details(
@@ -1129,10 +1099,15 @@ def _strategy_weather_details(
     divergence_gap = float(convergence["divergence_gap"])
     divergence_size_multiplier = float(convergence["divergence_size_multiplier"])
     catastrophic_divergence = bool(convergence["catastrophic_divergence"])
-    confidence_scale = float(convergence["confidence_scale"])
-    if confidence_scale < 1.0:
-        model_prob = 0.5 + ((model_prob - 0.5) * confidence_scale)
-        model_prob = max(0.03, min(0.97, model_prob))
+    model_prob = apply_divergence_probability_guard(
+        model_prob,
+        q_gfs,
+        q_ecmwf,
+    )
+    # Persist the exact YES-basis probability used by the production decision
+    # before any downstream guardrail can veto the market.  RBI evidence must
+    # learn from priced opportunities as well as submitted orders.
+    pricing_trace["q_decision_guarded"] = model_prob
     if catastrophic_divergence:
         return (
             False,
@@ -1557,6 +1532,8 @@ def evaluate_contract(
         )
 
     if is_weather:
+        from forecast.weather_contracts import weather_mode_for_ticker
+
         w_res = _strategy_weather_details(
             ticker,
             ask_yes,
@@ -1569,22 +1546,41 @@ def evaluate_contract(
         )
         weather_factors = list(w_res[3] or [])
         if not w_res[0]:
+            pricing_trace = dict(w_res[8] or {}) if len(w_res) > 8 else {}
+            traced_q_hat = pricing_trace.get(
+                "q_decision_guarded",
+                pricing_trace.get("q_hat"),
+            )
+            try:
+                scored_q_hat = (
+                    max(0.01, min(0.99, float(traced_q_hat)))
+                    if traced_q_hat is not None
+                    else 0.0
+                )
+            except (TypeError, ValueError):
+                scored_q_hat = 0.0
             return StrategyResult(
                 strategy_family="vetoed",
                 side="NONE",
-                q_hat=0.0,
+                q_hat=scored_q_hat,
                 ev=0.0,
                 ev_yes=0.0,
                 ev_no=0.0,
-                confidence=0.0,
+                confidence=float(scored_q_hat or 0.0),
                 uncertainty_penalty=0.0,
                 econ_approved=False,
                 veto_reason=str(weather_factors[0] if weather_factors else "no_strategy_signal"),
                 position_fraction=0.0,
                 position_contracts=0,
                 top_factors=weather_factors,
+                ask_yes=ask_yes,
+                ask_no=ask_no,
                 hours_to_resolution=hours_to_res,
                 is_taker_override=False,
+                model_prob_gfs=pricing_trace.get("q_gfs"),
+                model_prob_ecmwf=pricing_trace.get("q_ecmwf"),
+                weather_mode=str(weather_mode_for_ticker(ticker) or ""),
+                pricing_trace=pricing_trace,
             )
 
         best_side = str(w_res[1] or "NONE")
@@ -1626,8 +1622,13 @@ def evaluate_contract(
                 position_fraction=0.0,
                 position_contracts=0,
                 top_factors=best_factors,
+                ask_yes=ask_yes,
+                ask_no=ask_no,
                 hours_to_resolution=hours_to_res,
                 is_taker_override=True,
+                model_prob_gfs=pricing_trace.get("q_gfs"),
+                model_prob_ecmwf=pricing_trace.get("q_ecmwf"),
+                weather_mode=str(weather_mode_for_ticker(ticker) or ""),
                 pricing_trace=pricing_trace,
             )
         if hub_conviction_floor > 0.0:
@@ -1659,8 +1660,14 @@ def evaluate_contract(
                 position_fraction=0.0,
                 position_contracts=0,
                 top_factors=best_factors,
+                ask_yes=ask_yes,
+                ask_no=ask_no,
                 hours_to_resolution=hours_to_res,
                 is_taker_override=False,
+                model_prob_gfs=pricing_trace.get("q_gfs"),
+                model_prob_ecmwf=pricing_trace.get("q_ecmwf"),
+                weather_mode=str(weather_mode_for_ticker(ticker) or ""),
+                pricing_trace=pricing_trace,
             )
 
         p_cost = ask_yes if best_side == "YES" else ask_no
@@ -1680,11 +1687,16 @@ def evaluate_contract(
                 position_fraction=0.0,
                 position_contracts=0,
                 top_factors=best_factors,
+                ask_yes=ask_yes,
+                ask_no=ask_no,
                 hours_to_resolution=hours_to_res,
                 is_taker_override=False,
+                model_prob_gfs=pricing_trace.get("q_gfs"),
+                model_prob_ecmwf=pricing_trace.get("q_ecmwf"),
+                weather_mode=str(weather_mode_for_ticker(ticker) or ""),
+                pricing_trace=pricing_trace,
             )
 
-        from forecast.weather_contracts import weather_mode_for_ticker
         w_mode = weather_mode_for_ticker(ticker)
 
         approved, veto_reason = _weather_market_gate(

@@ -24,7 +24,12 @@ def get_production_policy_status(
 ) -> dict[str, Any]:
     """Return the versioned policy that actually governs a production entry."""
     import config
+    from forecast.covariance_engine import (
+        AUTHORITATIVE_COVARIANCE_MODE,
+        NON_AUTHORITATIVE_COVARIANCE_MODE,
+    )
     from forecast.pricing_engine import PHYSICS_METHOD, PRODUCTION_MODEL_PATH
+    from intelligence.health import get_rbi_evidence_health
     from runtime.build_info import get_build_info
 
     build = get_build_info()
@@ -68,6 +73,10 @@ def get_production_policy_status(
             "learning_gate_passed": bool(gate.get("passed")),
             "promotion_mode": "human_approved",
             "official_outcomes_only": True,
+            "evidence_health": get_rbi_evidence_health(
+                db_path=db_path,
+                learning_epoch=str(gate.get("learning_epoch") or config.RBI_LEARNING_EPOCH),
+            ),
         },
         "risk": {
             "max_deployed_pct": float(config.KALSHI_MAX_DEPLOYED_PCT),
@@ -84,6 +93,9 @@ def get_production_policy_status(
                 f"{config.KALSHI_HUB_EXPOSURE_PCT:.0%} of live balance)"
             ),
             "minimum_model_headroom_f": float(config.KALSHI_MIN_MODEL_HEADROOM_F),
+            "covariance_authoritative_mode": AUTHORITATIVE_COVARIANCE_MODE,
+            "covariance_non_authoritative_mode": NON_AUTHORITATIVE_COVARIANCE_MODE,
+            "covariance_errors_fail_closed": True,
         },
     }
 

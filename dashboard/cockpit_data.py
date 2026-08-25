@@ -667,10 +667,10 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Emergency Exit P&L": "This estimates what the book would look like if we tried to flatten at the live bid right now after fees. It is the harsher, more realistic liquidation view.",
         "Nearest Resolution": "This shows which open trade settles soonest. Near-expiry trades deserve extra attention because weather certainty and liquidity can change quickly into settlement.",
         "Data Ingestion": "The engine fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS, then attaches METAR and optional near-term HRRR. It fails closed without GFS and has no commercial ensemble or ICON path.",
-        "Adaptive Blend": "Governed RBI chooses the GFS/ECMWF split. It stays on its 60/40 baseline until this probability epoch has at least seven days and 24 official outcomes, a challenger wins chronological validation, and a human promotes it.",
+        "Adaptive Blend": "Governed RBI chooses the GFS/ECMWF split. It stays on its 60/40 baseline until this probability epoch has at least seven days and 24 independent official events, a challenger wins chronological validation, and a human promotes it.",
         "AI Volatility Adjustment": "NCEP AIGFS has no voting weight. Its standardized disagreement with GFS/ECMWF widens or narrows probability kernels and reaches Kelly size.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
-        "Position Sizing": f"The taker solver consumes convergence, divergence, sigma, AIGFS uncertainty, and same-event penalties, then enforces the ${KALSHI_MAX_USD_PER_POSITION:.0f} base rail, {KALSHI_KELLY_CAP:.0%} fee-inclusive Kelly cap, {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event cap, and hub/covariance limits.",
+        "Position Sizing": f"The taker solver consumes convergence, divergence, sigma, AIGFS uncertainty, and same-event penalties, then enforces the ${KALSHI_MAX_USD_PER_POSITION:.0f} base rail, {KALSHI_KELLY_CAP:.0%} fee-inclusive Kelly cap, {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event cap, and hub/covariance limits. If station history is incomplete, covariance switches to a worst-case gross, no-netting bound.",
         "Net EV Gate": (
             f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after Kalshi's "
             f"exchange-derived fee curve ({_fee_formula_text()}). This prevents the bot from buying "
@@ -737,9 +737,9 @@ def build_decision_funnel(
             "stage": "05",
             "label": "Sizing + Risk",
             "headline": f"Kelly cap {KALSHI_KELLY_CAP:.0%}",
-            "detail": f"${KALSHI_MAX_USD_PER_POSITION:.0f} position | {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event | covariance fail-closed",
+            "detail": f"${KALSHI_MAX_USD_PER_POSITION:.0f} position | {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event | covariance gross fallback",
             "pill": "Fee Inclusive",
-            "tooltip": "Convergence, divergence, predictive uncertainty, same-event exposure, position quantity, broker depth, and portfolio covariance all reach the final order cap.",
+            "tooltip": "Convergence, divergence, predictive uncertainty, same-event exposure, position quantity, broker depth, and portfolio covariance all reach the final order cap. Missing empirical station history disables covariance netting and uses a worst-case gross-comovement bound; calculation errors veto.",
         },
     ]
 

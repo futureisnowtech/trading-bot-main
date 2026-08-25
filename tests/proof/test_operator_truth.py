@@ -60,6 +60,10 @@ def test_live_kalshi_status_is_broker_first_and_surfaces_drift(proof_runtime, mo
     assert "weather_learning" in payload
     assert payload["production_policy"]["execution"]["entry_route"] == "taker_only_ioc"
     assert payload["production_policy"]["probability"]["physics_method"] == "bounded_heuristic_v1"
+    assert payload["production_policy"]["risk"]["covariance_non_authoritative_mode"] == (
+        "non_authoritative_gross_comonotonic"
+    )
+    assert "evidence_health" in payload["production_policy"]["rbi2"]
     assert payload["position_drift"]["has_drift"] is True
     assert payload["position_drift"]["broker_only"][0]["ticker"] == "KXHIGHLAX-26JUN05-B69.5"
     assert payload["position_drift"]["db_only"][0]["ticker"] == "KXHIGHNY-26JUN05-B89.5"

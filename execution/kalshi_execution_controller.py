@@ -283,6 +283,53 @@ class KalshiExecutionController:
         if now < self._next_order_at:
             time.sleep(self._next_order_at - now)
 
+    def _submission_gate_block(self, plan: ExecutionPlan) -> dict | None:
+        """Recheck every mutable entry permission at a broker-write boundary."""
+        # Lightweight mathematical test brokers intentionally omit the live
+        # snapshot interface. Real Kalshi brokers always expose it.
+        if not hasattr(self._broker, "position_snapshot_status"):
+            return None
+        if not self._broker.has_fresh_position_snapshot():
+            return {
+                "order_id": "ERR", "status": "position_snapshot_unavailable",
+                "qty": 0, "filled_qty": 0,
+                "execution_reason": str(self._broker.position_snapshot_status()),
+            }
+        try:
+            from forecast.firewall import check_entry_firewall
+
+            allowed, reason = check_entry_firewall(plan.ticker, plan.intent.bankroll)
+            if not allowed:
+                return {
+                    "order_id": "ERR", "status": "firewall_blocked",
+                    "qty": 0, "filled_qty": 0, "execution_reason": reason,
+                }
+        except Exception as exc:
+            return {
+                "order_id": "ERR", "status": "firewall_state_unavailable",
+                "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
+            }
+
+        try:
+            from runtime.operator_truth import get_release_status
+
+            release = get_release_status()
+            if not bool(release.get("entries_allowed")):
+                return {
+                    "order_id": "ERR", "status": "release_gate_blocked",
+                    "qty": 0, "filled_qty": 0,
+                    "execution_reason": str(
+                        release.get("current_release_verdict")
+                        or "release_not_promoted"
+                    ),
+                }
+        except Exception as exc:
+            return {
+                "order_id": "ERR", "status": "release_gate_unavailable",
+                "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
+            }
+        return None
+
     def execute_plan(
         self,
         plan: ExecutionPlan,
@@ -312,49 +359,9 @@ class KalshiExecutionController:
 
         self._respect_local_pacing()
 
-        # Real broker submissions get a second safety check at the last mutable
-        # boundary. Lightweight unit-test brokers intentionally omit the snapshot
-        # interface and exercise only controller math.
-        if hasattr(self._broker, "position_snapshot_status"):
-            if not self._broker.has_fresh_position_snapshot():
-                return {
-                    "order_id": "ERR", "status": "position_snapshot_unavailable",
-                    "qty": 0, "filled_qty": 0,
-                    "execution_reason": str(self._broker.position_snapshot_status()),
-                }
-            try:
-                from forecast.firewall import check_entry_firewall
-
-                allowed, reason = check_entry_firewall(plan.ticker, plan.intent.bankroll)
-                if not allowed:
-                    return {
-                        "order_id": "ERR", "status": "firewall_blocked",
-                        "qty": 0, "filled_qty": 0, "execution_reason": reason,
-                    }
-            except Exception as exc:
-                return {
-                    "order_id": "ERR", "status": "firewall_state_unavailable",
-                    "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
-                }
-
-            try:
-                from runtime.operator_truth import get_release_status
-
-                release = get_release_status()
-                if not bool(release.get("entries_allowed")):
-                    return {
-                        "order_id": "ERR", "status": "release_gate_blocked",
-                        "qty": 0, "filled_qty": 0,
-                        "execution_reason": str(
-                            release.get("current_release_verdict")
-                            or "release_not_promoted"
-                        ),
-                    }
-            except Exception as exc:
-                return {
-                    "order_id": "ERR", "status": "release_gate_unavailable",
-                    "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
-                }
+        gate_block = self._submission_gate_block(plan)
+        if gate_block is not None:
+            return gate_block
 
         # The candidate may have waited for evidence persistence, release checks,
         # or local pacing. Re-fetch depth and economics at the final boundary so
@@ -369,6 +376,12 @@ class KalshiExecutionController:
                 "execution_reason": refreshed_plan.reason or "final_replan_blocked",
             }
         plan = refreshed_plan
+
+        # Quote refresh is a network boundary. Permissions may change while it
+        # is in flight, so a prior passing verdict cannot authorize the POST.
+        gate_block = self._submission_gate_block(plan)
+        if gate_block is not None:
+            return gate_block
 
         result = self._broker.place_buy_order(
             contract_dict={

@@ -17,9 +17,7 @@ import os
 import sys
 import threading
 import time
-import traceback
 from datetime import datetime, timezone
-from typing import Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -1123,20 +1121,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 family = p.get("local_symbol", "").split("-")[0]
                 open_event_families_counts[family] += 1
             cycle_event_families = defaultdict(int, dict(open_event_families_counts))
-
-            # Initialize covariance correlation matrix R once per runner cycle
-            R = {}
-            is_authoritative = False
-            try:
-                from forecast.covariance_engine import get_station_correlation_matrix
-                from data.kalshi_weather_monitor import STATIONS
-                from config import DB_PATH
-
-                station_codes = [loc["icao"] for loc in STATIONS.values()]
-                R, is_authoritative = get_station_correlation_matrix(DB_PATH, station_codes)
-                logger.info(f"[ForecastRunner] Covariance matrix initialized. Authoritative: {is_authoritative}")
-            except Exception as cov_err:
-                logger.error(f"[ForecastRunner] Covariance init failed: {cov_err}")
 
             def _get_bars_fn(contract_id: int, interval: str) -> list[dict]:
                 return get_bars(contract_id, interval, limit=200)

@@ -117,6 +117,7 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
     monkeypatch.setattr(ed, "run_reconciliation", lambda: None, raising=False)
     monkeypatch.setattr(ed, "sync_incidents_and_notify", lambda: None, raising=False)
     monkeypatch.setattr(ed, "maintain_runtime_storage", lambda: None, raising=False)
+    monkeypatch.setattr(ed, "_start_briefing_refresh_if_due", lambda: None, raising=False)
     # Both dependencies are imported at call time. Isolate them explicitly so a
     # test can never authenticate, sweep orders, or depend on a developer .env.
     monkeypatch.setattr(

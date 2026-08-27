@@ -59,7 +59,7 @@ def test_examples_and_release_gates_pin_the_same_live_policy():
 
 
 def test_blacklist_policy_has_an_explicit_revision():
-    assert CITY_BLACKLIST_POLICY_REVISION == "2026-08-24.nyc-live"
+    assert CITY_BLACKLIST_POLICY_REVISION == "2026-08-26.top15-hubs"
 
 
 def test_deploy_migrates_the_persisted_droplet_env_to_live_policy():

@@ -18,11 +18,13 @@ from data.kalshi_weather_monitor import STATIONS
 from forecast import strategy_engine as se
 
 NYC_LIVE_BLACKLIST = {
-    "ABQ", "ATL", "AUS", "BOS", "CHS", "CLT", "DAL", "DC", "DET",
-    "HOU", "LV", "MCI", "MCO", "MIA", "MKE", "MSP", "MSY", "NY",
-    "OMA", "PDX", "PHL", "PHX", "RDU", "SEA", "SF", "SLC", "STL",
+    "ABQ", "CHS", "CLT", "DC", "DET", "LV", "MCI", "MCO", "MKE",
+    "MSP", "OMA", "PDX", "PHL", "PHX", "RDU", "SLC", "STL",
 }
-NYC_LIVE_ENABLED_STATIONS = {"CHI", "DEN", "LAX", "OKC", "SAT"}
+NYC_LIVE_ENABLED_STATIONS = {
+    "CHI", "DEN", "LAX", "OKC", "SAT",
+    "MIA", "ATL", "BOS", "DAL", "MSY", "AUS", "NY", "SF", "SEA", "HOU",
+}
 
 LIVE_TICKERS = {
     "PHX": ["KXHIGHTPHX-26AUG22-T105", "KXLOWTPHX-26AUG22-T80", "KXHIGHPHX-26AUG22-B105"],
@@ -38,7 +40,7 @@ def blacklist(monkeypatch):
 
 
 def test_versioned_source_blacklist_matches_nyc_live_posture():
-    assert CITY_BLACKLIST_POLICY_REVISION == "2026-08-24.nyc-live"
+    assert CITY_BLACKLIST_POLICY_REVISION == "2026-08-26.top15-hubs"
     assert set(DEFAULT_CITY_BLACKLIST) == NYC_LIVE_BLACKLIST
     assert set(STATIONS) - set(DEFAULT_CITY_BLACKLIST) == NYC_LIVE_ENABLED_STATIONS
 

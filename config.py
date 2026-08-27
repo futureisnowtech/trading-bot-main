@@ -276,12 +276,11 @@ KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVEN
 # silently trade 27 cities that production intentionally blocks.  The effective
 # default leaves CHI, DEN, LAX, OKC, and SAT enabled.  CITY_BLACKLIST remains an
 # intentional emergency override surface, including support for regional hubs.
-CITY_BLACKLIST_POLICY_REVISION: str = "2026-08-24.nyc-live"
+CITY_BLACKLIST_POLICY_REVISION: str = "2026-08-26.top15-hubs"
 DEFAULT_CITY_BLACKLIST: frozenset[str] = frozenset(
     {
-        "ABQ", "ATL", "AUS", "BOS", "CHS", "CLT", "DAL", "DC", "DET",
-        "HOU", "LV", "MCI", "MCO", "MIA", "MKE", "MSP", "MSY", "NY",
-        "OMA", "PDX", "PHL", "PHX", "RDU", "SEA", "SF", "SLC", "STL",
+        "ABQ", "CHS", "CLT", "DC", "DET", "LV", "MCI", "MCO", "MKE",
+        "MSP", "OMA", "PDX", "PHL", "PHX", "RDU", "SLC", "STL",
     }
 )
 _city_blacklist_env = os.getenv(

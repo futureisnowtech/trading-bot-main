@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-08-26 (City Firewall 15-Hub Expansion)
+- Expands active weather hubs from 5 to 15 by unblocking the top 10 historical performers from the 27 blocked cities based on canonical Kalshi settlement PnL (MIA, ATL, BOS, DAL, MSY, AUS, NY, SF, SEA, HOU).
+- Updates `DEFAULT_CITY_BLACKLIST` in `config.py` and across all CI/deploy workflows to the 17 remaining blocked cities (ABQ, CHS, CLT, DC, DET, LV, MCI, MCO, MKE, MSP, OMA, PDX, PHL, PHX, RDU, SLC, STL).
+- Advances `CITY_BLACKLIST_POLICY_REVISION` to `2026-08-26.top15-hubs`.
+
 ## 2026-08-25 (v19.20.3 live submission-boundary repair)
 - Replaces the order controller's slow full operator-status call at the immediate POST boundary with an exact-build local artifact check, while retaining the full live provider/lane/incident/balance gate before final broker refresh.
 - After all potentially slow release and quote reads, refreshes cash and positions, requires nondecreased admitted bankroll, compares the exact position/exposure book used by covariance and hub admission, and rechecks snapshot/firewall/release locally immediately before IOC submission. Changed, stale, unavailable, nonfinite, or fee-insufficient state vetoes without placing an order.

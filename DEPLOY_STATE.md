@@ -15,7 +15,7 @@ Last verified directly against NYC: 2026-08-25
 | Verified rollout | v19.20.3 live submission-boundary repair; the protected rollout's exact SHA and time are authoritative only in the runtime stamps listed below |
 | Open-Meteo commercial key | absent |
 | Weather provider actually available | keyless deterministic GFS + ECMWF + NCEP AIGFS disagreement; optional HRRR and METAR; no commercial ensemble and no ICON |
-| City firewall | 27 cities blocked; only CHI, DEN, LAX, OKC, SAT enabled |
+| City firewall | 17 cities blocked; 15 hubs enabled (CHI, DEN, LAX, OKC, SAT, MIA, ATL, BOS, DAL, MSY, AUS, NY, SF, SEA, HOU) |
 
 The stamped files are authoritative for deployed code identity:
 
